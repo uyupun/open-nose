@@ -35,6 +35,17 @@ _BACK_DEPTH = 3.0
 _NUM_TIP_FILLET_RINGS = 4
 # 鼻先の丸めに使う半径を、鼻先の半幅(tip_w/2)に対する比率で指定
 _TIP_FILLET_RADIUS_RATIO = 0.25
+# 鼻尖(鼻先の局所的な隆起)による前面迫り出しへの追加量を、tip_depth_front
+# に対する比率で指定。単純な直線的テーパーの終点ではなく、鼻先だけが丸く
+# 隆起して見えるようにする
+_TIP_BUMP_RATIO = 0.3
+# 鼻尖の隆起が効くy方向の範囲(鼻先中心からの距離、mm)
+_TIP_BUMP_SPAN = 9.0
+# 鼻翼(鼻孔まわりの張り出し)による半幅への追加量を、tip_w/2に対する
+# 比率で指定
+_ALAE_BUMP_RATIO = 0.35
+# 鼻翼の張り出しが効くy方向の範囲(鼻先中心からの距離、mm)
+_ALAE_BUMP_SPAN = 6.0
 # 鼻孔楕円体のy方向(鼻先から鼻の内部へ向かう、穴としての深さ方向。
 # _BACK_DEPTHやbridge/tip_depth_frontが指すz軸方向の「奥行き」とは別の軸
 # なので注意)の半径を、短径(nostril_b)の何倍にするか。浅い皿状のくぼみに
@@ -216,6 +227,30 @@ def _rounded_triangle_ring(
     return np.concatenate(arcs, axis=0)
 
 
+def _localized_bump(y: float, span: float, reference: float, ratio: float) -> float:
+    """鼻先(y=0)からspan以内で、余弦カーブで滑らかに0へ減衰するふくらみ量を返す。
+
+    鼻尖(前面迫り出しへの追加)・鼻翼(半幅への追加)のどちらも、
+    「鼻先付近だけ局所的に隆起し、離れるほど滑らかに元の形へ戻る」という
+    同じ形の変形なので共通化している。referenceはふくらみの基準量
+    (鼻先での最大値)、ratioはそれに対する隆起量の比率。
+    """
+    dist = abs(y)
+    if dist >= span:
+        return 0.0
+    return reference * ratio * 0.5 * (1 + np.cos(np.pi * dist / span))
+
+
+def _tip_bump(y: float, tip_depth_front: float) -> float:
+    """鼻尖(鼻先の局所的な隆起)による前面迫り出しへの追加量。"""
+    return _localized_bump(y, _TIP_BUMP_SPAN, tip_depth_front, _TIP_BUMP_RATIO)
+
+
+def _alae_bump(y: float, tip_half_w: float) -> float:
+    """鼻翼(鼻孔まわりの張り出し)による半幅への追加量。"""
+    return _localized_bump(y, _ALAE_BUMP_SPAN, tip_half_w, _ALAE_BUMP_RATIO)
+
+
 def _ring_at_y(half_width: float, depth_front: float, y: float) -> np.ndarray:
     """角丸三角形の輪郭(x, z)にyを結合し、3D頂点列 (_NUM_RING_POINTS, 3) にして返す。"""
     ring_2d = _rounded_triangle_ring(half_width, _BACK_DEPTH, depth_front)
@@ -233,6 +268,11 @@ def _ring_at(params: NoseParams, k: int) -> np.ndarray:
         + (params.tip_depth_front - params.bridge_depth_front) * s
     )
     y = params.nose_len * (1 - s)
+
+    # 鼻尖(前面)・鼻翼(半幅)の局所的な隆起を、直線的なテーパーに上乗せする
+    depth_front += _tip_bump(y, params.tip_depth_front)
+    half_w += _alae_bump(y, params.tip_w / 2)
+
     return _ring_at_y(half_w, depth_front, y)
 
 
@@ -283,7 +323,12 @@ def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.nd
         angle = (m / _NUM_TIP_FILLET_RINGS) * (np.pi / 2)
         inset = radius * (1 - np.cos(angle))
         ring_y = y - radius * np.sin(angle)
-        rings.append(_ring_at_y(half_w - inset, depth_front - inset, ring_y))
+
+        # 鼻尖・鼻翼の隆起は丸め区間にも及ぶため(_ring_atと同じ考え方)、
+        # 窄めた後の値に追加する
+        ring_depth_front = depth_front - inset + _tip_bump(ring_y, depth_front)
+        ring_half_w = half_w - inset + _alae_bump(ring_y, half_w)
+        rings.append(_ring_at_y(ring_half_w, ring_depth_front, ring_y))
     return rings
 
 
