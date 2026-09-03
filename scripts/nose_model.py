@@ -10,89 +10,306 @@ from typing import Literal
 import numpy as np
 import trimesh
 
-# 輪郭生成に使う点数(多いほど滑らかになる)
-_NUM_RING_POINTS = 32
-# スーパー楕円の角丸具合(大きいほど四角に近づく)
-_SUPERELLIPSE_ROUNDNESS = 4.0
-# 鼻孔楕円体の奥行き(y方向)を長径・短径に対してどれだけ薄く潰すか
-_NOSTRIL_DEPTH_RATIO = 0.6
-# 鼻孔を配置するy位置(鼻先=0からnose_lenに対する比率)
-_NOSTRIL_Y_RATIO = 0.12
-# 鼻孔を配置するz位置(鼻先断面の奥行きに対する比率。表面よりやや内側)
-_NOSTRIL_Z_RATIO = 0.7
+# 断面の多角形の頂点数(角丸三角形なので3)。_rounded_triangle_ringが
+# 実際に組み立てる頂点(背面2つ・前面1つ)の数と一致させること
+_NUM_TRIANGLE_CORNERS = 3
+# 角丸三角形の1つの角に使う点数(多いほど滑らかになる)
+_POINTS_PER_CORNER = 11
+# 輪郭生成に使う点数の合計。全ての角に均等に配分されるよう、
+# _NUM_RING_POINTSを独立した値にはせず_POINTS_PER_CORNERから導出する
+# (assertではなく構成上ズレが起きないようにするため)
+_NUM_RING_POINTS = _POINTS_PER_CORNER * _NUM_TRIANGLE_CORNERS
+# 角丸三角形の角の丸め半径を、半幅(half_width)に対する比率で指定
+_CORNER_ROUNDNESS_RATIO = 0.3
+# ボディのロフトに使うリング数(鼻筋〜鼻先の間を何段でつなぐか)
+_NUM_LOFT_RINGS = 8
+# 幅(x)テーパーの非線形度。1より大きいと鼻筋側は幅を保ち、鼻先側で急に
+# 広がる。奥行き(z)は別途、鼻筋から鼻先まで直線的にテーパーさせ、
+# 前面が斜め一直線に迫り出す三角形の側面シルエットにする
+_TAPER_POWER = 2.2
+# 鼻の背面(顔に接する側)の奥行き半径。鼻筋から鼻先まで一定とし、
+# 前面だけが迫り出すことで側面が三角形になるようにする
+_BACK_DEPTH = 3.0
+# 鼻孔楕円体のy方向(鼻先から鼻の内部へ向かう、穴としての深さ方向。
+# _BACK_DEPTHやbridge/tip_depth_frontが指すz軸方向の「奥行き」とは別の軸
+# なので注意)の半径を、短径(nostril_b)の何倍にするか。浅い皿状のくぼみに
+# ならないよう、実際の穴らしい深さを持たせる
+_NOSTRIL_DEPTH_RATIO = 2.0
+# 鼻孔断面(三角形)の奥行き(z)方向における鼻孔の中心位置を、断面のz範囲
+# ([-_BACK_DEPTH, tip_depth_front])に対する比率で指定。0は背面、1は前面。
+# 前面(1)に寄せすぎると断面が先細りして側面からはみ出し、背面(0)に
+# 寄せすぎると背面から突き抜けるため、その中間で前寄りの位置にしている。
+# _BACK_DEPTHやtip_depth_frontを変更しても追従するよう、絶対値ではなく
+# 比率で持つ
+_NOSTRIL_Z_RATIO = 0.47
 
 
-@dataclass
+@dataclass(frozen=True)
 class NoseParams:
-    """鼻モデルの寸法パラメータ(単位: mm)。"""
+    """鼻モデルの寸法パラメータ(単位: mm)。
+
+    構築後の変更を禁止する(frozen)ことで、__post_init__の検証を
+    後からのミューテーションで回避できないようにしている。
+    """
 
     bridge_w: float = 20.0
-    bridge_h: float = 15.0
+    bridge_depth_front: float = 4.0
     tip_w: float = 34.0
-    tip_h: float = 24.0
+    tip_depth_front: float = 16.0
     nose_len: float = 45.0
-    nostril_a: float = 6.0
-    nostril_b: float = 4.0
-    nostril_gap: float = 18.0
-    nostril_tilt_deg: float = 20.0
+    nostril_a: float = 4.0
+    nostril_b: float = 2.5
+    nostril_gap: float = 8.0
+    nostril_tilt_deg: float = 35.0
+
+    def __post_init__(self) -> None:
+        # 幅・奥行き・長さが0以下だと、フィレット計算(タンジェント長や
+        # 角度)が0除算・NaNを起こしたり、キャップ面が自己交差したりして、
+        # 例外を出さずに壊れたメッシュを生成してしまう。ここで早期に弾く
+        for name in ("bridge_w", "tip_w", "nose_len", "nostril_a", "nostril_b"):
+            value = getattr(self, name)
+            if value <= 0:
+                raise ValueError(f"{name} は正の値にすること: {value}")
+        # 境界ぎりぎり(例: -_BACK_DEPTHに極めて近い値)だと、チェック自体は
+        # 通過しても断面が自己交差する場合があるため、余裕を持たせる
+        margin = 0.5
+        for name in ("bridge_depth_front", "tip_depth_front"):
+            value = getattr(self, name)
+            if value <= -_BACK_DEPTH + margin:
+                raise ValueError(
+                    f"{name} は -_BACK_DEPTH + {margin} "
+                    f"({-_BACK_DEPTH + margin}) より大きくすること: {value}"
+                )
 
 
-def _superellipse_ring(half_width: float, half_depth: float) -> np.ndarray:
-    """角丸四角形(スーパー楕円)の輪郭点を (_NUM_RING_POINTS, 2) で返す。"""
-    t = np.linspace(0, 2 * np.pi, _NUM_RING_POINTS, endpoint=False)
-    ct, st = np.cos(t), np.sin(t)
-    x = np.sign(ct) * np.abs(ct) ** (2 / _SUPERELLIPSE_ROUNDNESS) * half_width
-    z = np.sign(st) * np.abs(st) ** (2 / _SUPERELLIPSE_ROUNDNESS) * half_depth
-    return np.stack([x, z], axis=1)
+def _unwrap_near(angle: float, reference: float) -> float:
+    """angleを、referenceとの差が[-pi, pi]に収まるよう2*piの整数倍だけずらして返す。"""
+    diff = angle - reference
+    return angle - 2 * np.pi * np.round(diff / (2 * np.pi))
+
+
+def _corner_edge_directions(
+    prev_v: np.ndarray, corner_v: np.ndarray, next_v: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """corner_vから隣接2頂点(prev_v, next_v)への単位方向ベクトルを返す。"""
+    u = prev_v - corner_v
+    u = u / np.linalg.norm(u)
+    v = next_v - corner_v
+    v = v / np.linalg.norm(v)
+    return u, v
+
+
+def _angle_between(u: np.ndarray, v: np.ndarray) -> float:
+    """単位ベクトルu, vのなす角(0〜pi)を返す。"""
+    return np.arccos(np.clip(np.dot(u, v), -1.0, 1.0))
+
+
+def _fillet_arc_geometry(
+    corner_v: np.ndarray,
+    edge_dirs: tuple[np.ndarray, np.ndarray],
+    radius: float,
+    beta: float,
+) -> tuple[np.ndarray, float, float]:
+    """角(corner_v、内角beta)を半径radiusで丸めたときの円弧の中心と、
+    始点・終点の角度を返す。
+
+    edge_dirsとbetaは呼び出し側(_corner_edge_directions + _angle_between)で
+    計算済みの値を渡すこと。radiusは、隣接する2つの角のタンジェント長の
+    合計が各辺の長さを超えない(フィレット同士が辺上で重ならない)ことを
+    呼び出し側が保証していること。
+    """
+    u, v = edge_dirs
+    tangent_len = radius / np.tan(beta / 2)
+
+    bisector = u + v
+    bisector /= np.linalg.norm(bisector)
+    center = corner_v + bisector * (radius / np.sin(beta / 2))
+
+    p1 = corner_v + u * tangent_len
+    p2 = corner_v + v * tangent_len
+    angle1 = np.arctan2(p1[1] - center[1], p1[0] - center[0])
+    angle2 = np.arctan2(p2[1] - center[1], p2[0] - center[0])
+
+    # p1からp2への弧の中心角は必ず(pi - beta)、すなわち[0, pi]に収まる
+    # (betaは内角で(0, pi)の範囲のため)。したがってangle1との差が
+    # [-pi, pi]に収まる側が常に正しい(凸な)弧であり、angle_cornerを
+    # 使った判定は不要かつ、betaが鈍角のとき逆向きの弧を選ぶ不具合の原因だった
+    angle2 = _unwrap_near(angle2, angle1)
+    return center, angle1, angle2
+
+
+def _fillet_corner(
+    corner_v: np.ndarray,
+    edge_dirs: tuple[np.ndarray, np.ndarray],
+    radius: float,
+    beta: float,
+    num_points: int,
+) -> np.ndarray:
+    """多角形の1つの角(corner_v、内角beta)を半径radiusで丸めた円弧の点列を返す。"""
+    center, angle1, angle2 = _fillet_arc_geometry(corner_v, edge_dirs, radius, beta)
+    angles = np.linspace(angle1, angle2, num_points)
+    arc_x = center[0] + radius * np.cos(angles)
+    arc_z = center[1] + radius * np.sin(angles)
+    return np.stack([arc_x, arc_z], axis=1)
+
+
+def _safe_corner_radius(
+    vertices: np.ndarray, betas: list[float], radius: float
+) -> float:
+    """辺を共有する2つの角のフィレットが辺上で重ならない安全な半径を返す。
+
+    1つの角だけを見て半径を制限しても、辺の反対側の角も同時に大きな
+    半径を要求していれば、両側のタンジェント点が辺の途中で交差し
+    (自己交差した不正な輪郭になり)、それでもTrimeshはwatertight/
+    winding_consistentと判定してしまう。そのため、各辺について両端の
+    タンジェント長の合計が辺の長さを超えないよう、三角形全体で半径を
+    決める。betasは各頂点の内角(vertices[i]に対応、呼び出し側で計算済み)。
+    """
+    num_corners = len(vertices)
+    margin = 0.95  # ちょうど辺いっぱいだと接点が一致してしまうため少し余裕を持たせる
+    for i in range(num_corners):
+        j = (i + 1) % num_corners
+        edge_len = np.linalg.norm(vertices[j] - vertices[i])
+        tangent_len_per_radius = 1 / np.tan(betas[i] / 2) + 1 / np.tan(betas[j] / 2)
+        radius = min(radius, edge_len * margin / tangent_len_per_radius)
+    return radius
+
+
+def _rounded_triangle_ring(
+    half_width: float, depth_back: float, depth_front: float
+) -> np.ndarray:
+    """角丸三角形の輪郭点を (_NUM_RING_POINTS, 2) で返す。
+
+    背面(depth_back)側の2頂点を底辺、前面(depth_front)側の1頂点を頂点とする
+    三角形の角を丸めることで、鼻の前後非対称な断面(背面は平ら、前面だけ
+    尖って迫り出す)を三角柱に近い構造で表現する。
+    """
+    vertices = np.array(
+        [[-half_width, -depth_back], [half_width, -depth_back], [0.0, depth_front]]
+    )
+    num_corners = len(vertices)
+
+    # 各頂点の辺方向ベクトル(edge_dirs)と内角(beta)は_safe_corner_radiusと
+    # _fillet_cornerの両方で必要になるが、ここで1度だけ計算して使い回す
+    edge_dirs = [
+        _corner_edge_directions(
+            vertices[i - 1], vertices[i], vertices[(i + 1) % num_corners]
+        )
+        for i in range(num_corners)
+    ]
+    betas = [_angle_between(u, v) for u, v in edge_dirs]
+    radius = _safe_corner_radius(
+        vertices, betas, half_width * _CORNER_ROUNDNESS_RATIO
+    )
+
+    arcs = [
+        _fillet_corner(
+            vertices[i], edge_dirs[i], radius, betas[i], _POINTS_PER_CORNER
+        )
+        for i in range(num_corners)
+    ]
+    return np.concatenate(arcs, axis=0)
+
+
+def _ring_at(params: NoseParams, k: int) -> np.ndarray:
+    """k番目のリング(0=鼻筋, _NUM_LOFT_RINGS-1=鼻先)の3D頂点列 (_NUM_RING_POINTS, 3) を返す。"""
+    s = k / (_NUM_LOFT_RINGS - 1)  # 0=鼻筋(上), 1=鼻先(下)
+    width_taper = s**_TAPER_POWER
+    half_w = (params.bridge_w + (params.tip_w - params.bridge_w) * width_taper) / 2
+    depth_front = (
+        params.bridge_depth_front
+        + (params.tip_depth_front - params.bridge_depth_front) * s
+    )
+    y = params.nose_len * (1 - s)
+
+    ring_2d = _rounded_triangle_ring(half_w, _BACK_DEPTH, depth_front)
+    y_col = np.full(len(ring_2d), y)
+    return np.column_stack([ring_2d[:, 0], y_col, ring_2d[:, 1]])
+
+
+def _loft_side_faces() -> list[list[int]]:
+    """隣接リング間を繋ぐ側面の三角形面を返す。"""
+    faces = []
+    for k in range(_NUM_LOFT_RINGS - 1):
+        ring_a = k * _NUM_RING_POINTS
+        ring_b = (k + 1) * _NUM_RING_POINTS
+        for i in range(_NUM_RING_POINTS):
+            j = (i + 1) % _NUM_RING_POINTS
+            faces.append([ring_a + i, ring_b + j, ring_b + i])
+            faces.append([ring_a + i, ring_a + j, ring_b + j])
+    return faces
+
+
+def _loft_cap_faces(bridge_center_idx: int, tip_center_idx: int) -> list[list[int]]:
+    """鼻筋側・鼻先側の両端を、それぞれの中心点から扇状に閉じる面を返す。"""
+    faces = []
+    tip_ring_start = (_NUM_LOFT_RINGS - 1) * _NUM_RING_POINTS
+    for i in range(_NUM_RING_POINTS):
+        j = (i + 1) % _NUM_RING_POINTS
+        faces.append([bridge_center_idx, j, i])
+        faces.append([tip_center_idx, tip_ring_start + i, tip_ring_start + j])
+    return faces
 
 
 def _build_body(params: NoseParams) -> trimesh.Trimesh:
-    """鼻筋(y=nose_len)から鼻先(y=0)へテーパーするロフト形状。"""
-    num_points = _NUM_RING_POINTS
-    bridge_ring = _superellipse_ring(params.bridge_w / 2, params.bridge_h / 2)
-    tip_ring = _superellipse_ring(params.tip_w / 2, params.tip_h / 2)
+    """鼻筋(y=nose_len)から鼻先(y=0)へテーパーするロフト形状。
 
-    bridge_verts = np.column_stack(
-        [bridge_ring[:, 0], np.full(num_points, params.nose_len), bridge_ring[:, 1]]
-    )
-    tip_verts = np.column_stack(
-        [tip_ring[:, 0], np.zeros(num_points), tip_ring[:, 1]]
-    )
-
-    bridge_center_idx = 2 * num_points
-    tip_center_idx = 2 * num_points + 1
+    幅(x)は鼻筋側で保たれ鼻先側で急に広がる非線形テーパー、奥行き(z)の
+    前面は鼻筋から鼻先まで直線的に迫り出すテーパーにすることで、
+    正面から見ても側面から見ても丸みを帯びた三角形のシルエットになる。
+    """
+    ring_vertices = [_ring_at(params, k) for k in range(_NUM_LOFT_RINGS)]
+    bridge_center_idx = _NUM_LOFT_RINGS * _NUM_RING_POINTS
+    tip_center_idx = bridge_center_idx + 1
     vertices = np.vstack(
-        [bridge_verts, tip_verts, [[0.0, params.nose_len, 0.0]], [[0.0, 0.0, 0.0]]]
+        ring_vertices + [[[0.0, params.nose_len, 0.0]], [[0.0, 0.0, 0.0]]]
     )
 
-    faces = []
-    for i in range(num_points):
-        j = (i + 1) % num_points
-        faces.append([i, num_points + j, num_points + i])
-        faces.append([i, j, num_points + j])
-        faces.append([bridge_center_idx, j, i])
-        faces.append([tip_center_idx, num_points + i, num_points + j])
+    faces = _loft_side_faces()
+    faces += _loft_cap_faces(bridge_center_idx, tip_center_idx)
 
     return trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=True)
 
 
-def _build_nostril(params: NoseParams, side: Literal[-1, 1]) -> trimesh.Trimesh:
-    """鼻孔を表す楕円体(現時点ではボディへのブーリアン減算はせず、表面近くに配置するのみ)。"""
+def _nostril_ellipsoid(params: NoseParams) -> trimesh.Trimesh:
+    """鼻孔をくり抜くための楕円体(原点中心、回転・配置前)を返す。"""
     mesh = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
-
     scale = np.eye(4)
     scale[0, 0] = params.nostril_a
     scale[1, 1] = params.nostril_b * _NOSTRIL_DEPTH_RATIO
     scale[2, 2] = params.nostril_b
     mesh.apply_transform(scale)
+    return mesh
 
-    tilt = np.radians(params.nostril_tilt_deg) * side
+
+def _build_nostril(
+    base_ellipsoid: trimesh.Trimesh,
+    gap: float,
+    tilt_deg: float,
+    depth_front: float,
+    side: Literal[-1, 1],
+) -> trimesh.Trimesh:
+    """base_ellipsoidを回転・配置し、鼻先の下側(y=0の断面付近)を向く鼻孔にする。
+
+    形状(nostril_a/nostril_b)はbase_ellipsoidに既に反映済みなので、ここでは
+    配置に関わる値(nostril_gap, nostril_tilt_deg, tip_depth_front)だけを
+    受け取る。NoseParams全体を渡さないのは、base_ellipsoid構築後にparamsが
+    変わっても形状に反映されない、という食い違いを起こさないため。
+    """
+    mesh = base_ellipsoid.copy()
+
+    # y軸まわりに回転させる(x-z平面内で傾く)ことで、底面から見たときに
+    # 左右の鼻孔が「ハ」の字に開くようにする
+    tilt = np.radians(tilt_deg) * side
     rotate = trimesh.transformations.rotation_matrix(tilt, [0, 1, 0])
     mesh.apply_transform(rotate)
 
-    x_pos = side * params.nostril_gap / 2
-    y_pos = params.nose_len * _NOSTRIL_Y_RATIO
-    z_pos = params.tip_h / 2 * _NOSTRIL_Z_RATIO
+    x_pos = side * gap / 2
+    # y=0の断面上に中心を置く。楕円体のちょうど半分がy<0(ボディの外)に
+    # はみ出す形になり、ブーリアン減算後に鼻先の下側を向いた自然な深さの
+    # 開口部になる
+    y_pos = 0.0
+    z_pos = -_BACK_DEPTH + (depth_front + _BACK_DEPTH) * _NOSTRIL_Z_RATIO
     mesh.apply_translation([x_pos, y_pos, z_pos])
 
     return mesh
@@ -102,14 +319,34 @@ def build_nose_scene() -> trimesh.Scene:
     params = NoseParams()
 
     body = _build_body(params)
+    base_ellipsoid = _nostril_ellipsoid(params)
+    left, right = (
+        _build_nostril(
+            base_ellipsoid,
+            gap=params.nostril_gap,
+            tilt_deg=params.nostril_tilt_deg,
+            depth_front=params.tip_depth_front,
+            side=side,
+        )
+        for side in (-1, 1)
+    )
+
+    # 鼻孔同士が重なると1つの穴に融合してしまい、ブーリアン減算自体は
+    # 成功する(watertightなメッシュが返る)ため、事前に重なりを検出する
+    if len(left.intersection(right).faces) > 0:
+        raise ValueError(
+            "左右の鼻孔が重なっている。nostril_a/nostril_gapを見直すこと"
+        )
+
+    body = body.difference([left, right])
+    if len(body.faces) == 0:
+        raise ValueError(
+            "鼻孔のブーリアン減算でボディが消失した。"
+            "nostril_a/nostril_b/nostril_gapが大きすぎる可能性がある"
+        )
     body.visual.face_colors = [255, 220, 200, 255]
 
-    left = _build_nostril(params, side=-1)
-    right = _build_nostril(params, side=1)
-    for nostril in (left, right):
-        nostril.visual.face_colors = [120, 60, 60, 255]
-
-    return trimesh.Scene({"body": body, "nostril_left": left, "nostril_right": right})
+    return trimesh.Scene({"body": body})
 
 
 def main() -> None:

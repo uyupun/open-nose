@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.14"
 dependencies = [
+    "manifold3d>=3.5.2",
     "numpy>=2.5.2",
     "pyglet<2",
     "scipy>=1.18.1",
