@@ -29,7 +29,21 @@ _NUM_LOFT_RINGS = 8
 _TAPER_POWER = 2.2
 # 鼻の背面(顔に接する側)の奥行き半径。鼻筋から鼻先まで一定とし、
 # 前面だけが迫り出すことで側面が三角形になるようにする
-_BACK_DEPTH = 3.48
+_BACK_DEPTH = 2.2
+# 鼻根(鼻筋の付け根、y=nose_len付近。顔との接着面にあたる)で背面を
+# 局所的に浅くする、くびれの強さを_BACK_DEPTHに対する比率で指定。
+# 背面が鼻筋から鼻先まで一定の平らな板のままだと、実際の鼻のように
+# 鼻根でくびれてから顔と分かれる形にならず、厚い板が貼り付いたように
+# 見えてしまう
+_ROOT_WAIST_RATIO = 0.85
+# 鼻根のくびれによる半幅(half_w)の減算量を、bridge_w/2に対する比率で
+# 指定。背面だけでなく幅も一緒にくびれさせることで、鼻根まわり全体を
+# 細くする
+_ROOT_WAIST_WIDTH_RATIO = 0.9
+# 鼻根のくびれが効くy方向の範囲(鼻根中心からの距離、mm)。狭すぎると
+# 鼻根のごく近傍にしか効かず、通常の見た目では気づきにくい局所的な
+# 切り欠きになってしまうため、鼻筋の長さに対してある程度の割合を持たせる
+_ROOT_WAIST_SPAN = 25.0
 # 鼻先の最終リング(側面が最大幅まで迫り出した断面)から、キャップ面へ
 # つなぐ丸め処理に使う追加リングの数
 _NUM_TIP_FILLET_RINGS = 4
@@ -54,10 +68,10 @@ _NOSTRIL_DEPTH_RATIO = 2.0
 # 鼻孔断面(三角形)の奥行き(z)方向における鼻孔の中心位置を、断面のz範囲
 # ([-_BACK_DEPTH, tip_depth_front])に対する比率で指定。0は背面、1は前面。
 # 前面(1)に寄せすぎると断面が先細りして側面からはみ出し、背面(0)に
-# 寄せすぎると背面から突き抜けるため、その中間で前寄りの位置にしている。
-# _BACK_DEPTHやtip_depth_frontを変更しても追従するよう、絶対値ではなく
-# 比率で持つ
-_NOSTRIL_Z_RATIO = 0.58
+# 寄せすぎると背面から突き抜けるため、前後の隙間が均等になる中間に
+# 置いている。_BACK_DEPTHやtip_depth_frontを変更しても追従するよう、
+# 絶対値ではなく比率で持つ
+_NOSTRIL_Z_RATIO = 0.5
 
 
 @dataclass(frozen=True)
@@ -69,14 +83,14 @@ class NoseParams:
     """
 
     bridge_w: float = 23.2
-    bridge_depth_front: float = 4.64
+    bridge_depth_front: float = 2.1
     tip_w: float = 34.8
-    tip_depth_front: float = 18.56
+    tip_depth_front: float = 12.0
     nose_len: float = 52.2
-    nostril_a: float = 5.8
-    nostril_b: float = 3.6
-    nostril_gap: float = 8.1
-    nostril_tilt_deg: float = 66.0
+    nostril_a: float = 5.6
+    nostril_b: float = 3.2
+    nostril_gap: float = 8.5
+    nostril_tilt_deg: float = 55.0
 
     def __post_init__(self) -> None:
         # 幅・奥行き・長さが0以下だと、フィレット計算(タンジェント長や
@@ -251,9 +265,25 @@ def _alae_bump(y: float, tip_half_w: float) -> float:
     return _localized_bump(y, _ALAE_BUMP_SPAN, tip_half_w, _ALAE_BUMP_RATIO)
 
 
-def _ring_at_y(half_width: float, depth_front: float, y: float) -> np.ndarray:
+def _root_waist_depth_bump(y: float, nose_len: float) -> float:
+    """鼻根(鼻筋の付け根)のくびれによる、背面(depth_back)からの減算量。
+
+    _localized_bumpは鼻先(y=0)を中心に減衰するが、くびれの中心は
+    鼻根(y=nose_len)なので、yをnose_len分ずらして中心を合わせている。
+    """
+    return _localized_bump(y - nose_len, _ROOT_WAIST_SPAN, _BACK_DEPTH, _ROOT_WAIST_RATIO)
+
+
+def _root_waist_width_bump(y: float, nose_len: float, bridge_half_w: float) -> float:
+    """鼻根のくびれによる、半幅(half_w)からの減算量。"""
+    return _localized_bump(
+        y - nose_len, _ROOT_WAIST_SPAN, bridge_half_w, _ROOT_WAIST_WIDTH_RATIO
+    )
+
+
+def _ring_at_y(half_width: float, depth_back: float, depth_front: float, y: float) -> np.ndarray:
     """角丸三角形の輪郭(x, z)にyを結合し、3D頂点列 (_NUM_RING_POINTS, 3) にして返す。"""
-    ring_2d = _rounded_triangle_ring(half_width, _BACK_DEPTH, depth_front)
+    ring_2d = _rounded_triangle_ring(half_width, depth_back, depth_front)
     y_col = np.full(len(ring_2d), y)
     return np.column_stack([ring_2d[:, 0], y_col, ring_2d[:, 1]])
 
@@ -272,8 +302,11 @@ def _ring_at(params: NoseParams, k: int) -> np.ndarray:
     # 鼻尖(前面)・鼻翼(半幅)の局所的な隆起を、直線的なテーパーに上乗せする
     depth_front += _tip_bump(y, params.tip_depth_front)
     half_w += _alae_bump(y, params.tip_w / 2)
+    # 鼻根(半幅・背面)のくびれを差し引く
+    half_w -= _root_waist_width_bump(y, params.nose_len, params.bridge_w / 2)
+    depth_back = _BACK_DEPTH - _root_waist_depth_bump(y, params.nose_len)
 
-    return _ring_at_y(half_w, depth_front, y)
+    return _ring_at_y(half_w, depth_back, depth_front, y)
 
 
 def _loft_side_faces(num_rings: int) -> list[list[int]]:
@@ -328,7 +361,9 @@ def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.nd
         # 窄めた後の値に追加する
         ring_depth_front = depth_front - inset + _tip_bump(ring_y, depth_front)
         ring_half_w = half_w - inset + _alae_bump(ring_y, half_w)
-        rings.append(_ring_at_y(ring_half_w, ring_depth_front, ring_y))
+        # 丸め区間は鼻先(y=0)付近に限られ鼻根から十分離れているため、
+        # 背面は_root_waist_bumpの影響を受けない_BACK_DEPTHのままでよい
+        rings.append(_ring_at_y(ring_half_w, _BACK_DEPTH, ring_depth_front, ring_y))
     return rings
 
 
