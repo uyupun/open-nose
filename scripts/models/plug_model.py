@@ -36,6 +36,30 @@ class PlugParams:
                 raise ValueError(f"{name} は正の値にすること: {value}")
 
 
+def plug_center(gap: float, depth_front: float, side: Literal[-1, 1]) -> np.ndarray:
+    """指定側の鼻栓プレースホルダーの中心座標を返す。
+
+    形状(diameter/length)には依存しないためPlugParamsは受け取らない。
+    frame_model側が保持部の目標位置として参照するために公開している。
+    """
+    x_pos = side * gap / 2
+    z_pos = nostril_depth_z(depth_front)
+    return np.array([x_pos, _PLUG_Y_OFFSET, z_pos])
+
+
+def plug_outer_end(
+    plug: PlugParams, gap: float, depth_front: float, side: Literal[-1, 1]
+) -> np.ndarray:
+    """指定側の鼻栓プレースホルダーの、外側(鼻の外に露出している側)の端点座標を返す。
+
+    yが負の向き(_PLUG_Y_OFFSETの正負の説明を参照)が鼻先の外側方向なので、
+    中心からlength/2だけ-y方向にずらした点が露出端になる。frame_modelの
+    保持部は、鼻孔の奥にあたる中心ではなくこの露出端を目標位置にする
+    """
+    center = plug_center(gap, depth_front, side)
+    return center - np.array([0.0, plug.length / 2, 0.0])
+
+
 def _build_plug(
     plug: PlugParams, gap: float, depth_front: float, side: Literal[-1, 1]
 ) -> trimesh.Trimesh:
@@ -43,17 +67,13 @@ def _build_plug(
 
     鼻孔の深さ方向はnostril_depth_zと同じy軸(鼻先から鼻の内部へ向かう
     向き)。trimesh.creation.cylinderの既定の軸はzなので、x軸まわりに
-    90度回転させてyに揃える。x_pos・z_posは鼻孔と同じ考え方で
-    鼻孔の中心に合わせる(circular断面のため、ハの字の傾き自体は円柱の
-    見た目に影響しない)。y方向だけは_PLUG_Y_OFFSET分ずらす(上記参照)
+    90度回転させてyに揃える。配置位置(x_pos・y_pos・z_pos)はplug_centerと
+    同じ値を使う
     """
     mesh = trimesh.creation.cylinder(radius=plug.diameter / 2, height=plug.length)
     rotate_to_y = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
     mesh.apply_transform(rotate_to_y)
-
-    x_pos = side * gap / 2
-    z_pos = nostril_depth_z(depth_front)
-    mesh.apply_translation([x_pos, _PLUG_Y_OFFSET, z_pos])
+    mesh.apply_translation(plug_center(gap, depth_front, side))
 
     return mesh
 

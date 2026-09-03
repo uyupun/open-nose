@@ -341,16 +341,20 @@ def _ring_at_y(half_width: float, depth_back: float, depth_front: float, y: floa
     return np.column_stack([ring_2d[:, 0], y_col, ring_2d[:, 1]])
 
 
-def _ring_at(params: NoseParams, k: int) -> np.ndarray:
-    """k番目のリング(0=鼻筋, _NUM_LOFT_RINGS-1=鼻先)の3D頂点列 (_NUM_RING_POINTS, 3) を返す。"""
-    s = k / (_NUM_LOFT_RINGS - 1)  # 0=鼻筋(上), 1=鼻先(下)
+def surface_profile(params: NoseParams, y: float) -> tuple[float, float, float]:
+    """指定したyにおける鼻表面の断面プロファイル(半幅, 背面奥行き, 前面迫り出し)を返す。
+
+    _ring_atが使うテーパー式(鼻尖・鼻翼の隆起、鼻根のくびれを含む)から、
+    リング全体ではなくこの3値だけを取り出したもの。models.frame_modelが
+    鼻の外側に沿った経路を組むために参照する
+    """
+    s = 1 - y / params.nose_len  # 0=鼻筋(上), 1=鼻先(下)
     width_taper = s**_TAPER_POWER
     half_w = (params.bridge_w + (params.tip_w - params.bridge_w) * width_taper) / 2
     depth_front = (
         params.bridge_depth_front
         + (params.tip_depth_front - params.bridge_depth_front) * s
     )
-    y = params.nose_len * (1 - s)
 
     # 鼻尖(前面)・鼻翼(半幅)の局所的な隆起を、直線的なテーパーに上乗せする
     depth_front += _tip_bump(y, params.tip_depth_front)
@@ -359,6 +363,14 @@ def _ring_at(params: NoseParams, k: int) -> np.ndarray:
     half_w -= _root_waist_width_bump(y, params.nose_len, params.bridge_w / 2)
     depth_back = _BACK_DEPTH - _root_waist_depth_bump(y, params.nose_len)
 
+    return half_w, depth_back, depth_front
+
+
+def _ring_at(params: NoseParams, k: int) -> np.ndarray:
+    """k番目のリング(0=鼻筋, _NUM_LOFT_RINGS-1=鼻先)の3D頂点列 (_NUM_RING_POINTS, 3) を返す。"""
+    s = k / (_NUM_LOFT_RINGS - 1)  # 0=鼻筋(上), 1=鼻先(下)
+    y = params.nose_len * (1 - s)
+    half_w, depth_back, depth_front = surface_profile(params, y)
     return _ring_at_y(half_w, depth_back, depth_front, y)
 
 
@@ -388,6 +400,51 @@ def _loft_cap_faces(
     return faces
 
 
+def _tip_fillet_radius(half_w: float, depth_front: float) -> float:
+    """鼻先の丸め処理(_tip_fillet_rings)に使う半径を返す。
+
+    insetの最大値(半径そのもの)がhalf_wやdepth_frontを超えると、輪郭の
+    前面頂点が背面の辺を越えて反転してしまう(winding反転。
+    _safe_corner_radiusで対処した不具合と同じクラス)。tip_depth_frontが
+    小さいパラメータで実際に再現するため、半幅・前面迫り出しの小さい方を
+    超えないよう安全マージンを掛けて制限する
+    """
+    margin = 0.9
+    return min(half_w * _TIP_FILLET_RADIUS_RATIO, min(half_w, depth_front) * margin)
+
+
+def tip_cap_min_y(params: NoseParams) -> float:
+    """鼻先の丸め処理(_tip_fillet_rings)が実際に到達する最小のy座標を返す。
+
+    鼻本体メッシュはy=0からこの値までしか存在しない(丸め処理はy=0を
+    中心に四分円状に窄まるため、最も鼻先側の点はy=0-radius)。この値より
+    小さいyには鼻本体メッシュが存在しないため、models.frame_modelが
+    「鼻の外側」を判定する基準として使う
+    """
+    radius = _tip_fillet_radius(params.tip_w / 2, params.tip_depth_front)
+    return -radius
+
+
+def tip_cap_depth_front(params: NoseParams, y: float) -> float:
+    """鼻先の丸め区間([tip_cap_min_y(params), 0])における前面迫り出しの
+    実測値を返す。
+
+    surface_profileの式はこの区間の実際の丸め形状(_tip_fillet_rings)を
+    表さない(単純なテーパーを延長するだけで、丸め処理による窄まりを
+    無視する)ため、この区間ではこちらを使う。_tip_fillet_ringsのinset
+    計算をyから逆算する形で再現している(y=0でsurface_profileの値と
+    一致する)。models.frame_modelが鼻先付近で外側判定をする際、
+    surface_profileの延長値より正確(かつより小さい、鼻に近い)値を
+    得るために使う
+    """
+    half_w = params.tip_w / 2
+    depth_front = params.tip_depth_front
+    radius = _tip_fillet_radius(half_w, depth_front)
+    angle = np.arcsin(np.clip(-y / radius, -1.0, 1.0))
+    inset = radius * (1 - np.cos(angle))
+    return depth_front - inset + _tip_bump(y, depth_front)
+
+
 def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.ndarray]:
     """鼻先の最終リング(半幅half_w・前面迫り出しdepth_front・位置y)から
     キャップ面へ、四分円状に断面を窄めながらつなぐ追加リング群を返す。
@@ -397,13 +454,7 @@ def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.nd
     側面から丸くつながって下面に至る)。_fillet_cornerと同様、円弧
     (半径radius)で丸める考え方を3Dのリング列に適用している。
     """
-    # insetの最大値(m=_NUM_TIP_FILLET_RINGSでradiusそのもの)がhalf_wや
-    # depth_frontを超えると、輪郭の前面頂点が背面の辺を越えて反転してしまう
-    # (winding反転。_safe_corner_radiusで対処した不具合と同じクラス)。
-    # tip_depth_frontが小さいパラメータで実際に再現するため、半幅・前面
-    # 迫り出しの小さい方を超えないよう安全マージンを掛けて制限する
-    margin = 0.9
-    radius = min(half_w * _TIP_FILLET_RADIUS_RATIO, min(half_w, depth_front) * margin)
+    radius = _tip_fillet_radius(half_w, depth_front)
     rings = []
     for m in range(1, _NUM_TIP_FILLET_RINGS + 1):
         angle = (m / _NUM_TIP_FILLET_RINGS) * (np.pi / 2)
