@@ -29,7 +29,7 @@ _NUM_LOFT_RINGS = 8
 _TAPER_POWER = 2.2
 # 鼻の背面(顔に接する側)の奥行き半径。鼻筋から鼻先まで一定とし、
 # 前面だけが迫り出すことで側面が三角形になるようにする
-_BACK_DEPTH = 3.0
+_BACK_DEPTH = 3.48
 # 鼻先の最終リング(側面が最大幅まで迫り出した断面)から、キャップ面へ
 # つなぐ丸め処理に使う追加リングの数
 _NUM_TIP_FILLET_RINGS = 4
@@ -40,12 +40,12 @@ _TIP_FILLET_RADIUS_RATIO = 0.25
 # 隆起して見えるようにする
 _TIP_BUMP_RATIO = 0.3
 # 鼻尖の隆起が効くy方向の範囲(鼻先中心からの距離、mm)
-_TIP_BUMP_SPAN = 9.0
+_TIP_BUMP_SPAN = 10.44
 # 鼻翼(鼻孔まわりの張り出し)による半幅への追加量を、tip_w/2に対する
 # 比率で指定
 _ALAE_BUMP_RATIO = 0.1
 # 鼻翼の張り出しが効くy方向の範囲(鼻先中心からの距離、mm)
-_ALAE_BUMP_SPAN = 6.0
+_ALAE_BUMP_SPAN = 6.96
 # 鼻孔楕円体のy方向(鼻先から鼻の内部へ向かう、穴としての深さ方向。
 # _BACK_DEPTHやbridge/tip_depth_frontが指すz軸方向の「奥行き」とは別の軸
 # なので注意)の半径を、短径(nostril_b)の何倍にするか。浅い皿状のくぼみに
@@ -68,14 +68,14 @@ class NoseParams:
     後からのミューテーションで回避できないようにしている。
     """
 
-    bridge_w: float = 20.0
-    bridge_depth_front: float = 4.0
-    tip_w: float = 30.0
-    tip_depth_front: float = 16.0
-    nose_len: float = 45.0
-    nostril_a: float = 5.0
-    nostril_b: float = 3.1
-    nostril_gap: float = 7.0
+    bridge_w: float = 23.2
+    bridge_depth_front: float = 4.64
+    tip_w: float = 34.8
+    tip_depth_front: float = 18.56
+    nose_len: float = 52.2
+    nostril_a: float = 5.8
+    nostril_b: float = 3.6
+    nostril_gap: float = 8.1
     nostril_tilt_deg: float = 66.0
 
     def __post_init__(self) -> None:
