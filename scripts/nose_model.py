@@ -30,6 +30,11 @@ _TAPER_POWER = 2.2
 # 鼻の背面(顔に接する側)の奥行き半径。鼻筋から鼻先まで一定とし、
 # 前面だけが迫り出すことで側面が三角形になるようにする
 _BACK_DEPTH = 3.0
+# 鼻先の最終リング(側面が最大幅まで迫り出した断面)から、キャップ面へ
+# つなぐ丸め処理に使う追加リングの数
+_NUM_TIP_FILLET_RINGS = 4
+# 鼻先の丸めに使う半径を、鼻先の半幅(tip_w/2)に対する比率で指定
+_TIP_FILLET_RADIUS_RATIO = 0.25
 # 鼻孔楕円体のy方向(鼻先から鼻の内部へ向かう、穴としての深さ方向。
 # _BACK_DEPTHやbridge/tip_depth_frontが指すz軸方向の「奥行き」とは別の軸
 # なので注意)の半径を、短径(nostril_b)の何倍にするか。浅い皿状のくぼみに
@@ -211,6 +216,13 @@ def _rounded_triangle_ring(
     return np.concatenate(arcs, axis=0)
 
 
+def _ring_at_y(half_width: float, depth_front: float, y: float) -> np.ndarray:
+    """角丸三角形の輪郭(x, z)にyを結合し、3D頂点列 (_NUM_RING_POINTS, 3) にして返す。"""
+    ring_2d = _rounded_triangle_ring(half_width, _BACK_DEPTH, depth_front)
+    y_col = np.full(len(ring_2d), y)
+    return np.column_stack([ring_2d[:, 0], y_col, ring_2d[:, 1]])
+
+
 def _ring_at(params: NoseParams, k: int) -> np.ndarray:
     """k番目のリング(0=鼻筋, _NUM_LOFT_RINGS-1=鼻先)の3D頂点列 (_NUM_RING_POINTS, 3) を返す。"""
     s = k / (_NUM_LOFT_RINGS - 1)  # 0=鼻筋(上), 1=鼻先(下)
@@ -221,16 +233,13 @@ def _ring_at(params: NoseParams, k: int) -> np.ndarray:
         + (params.tip_depth_front - params.bridge_depth_front) * s
     )
     y = params.nose_len * (1 - s)
-
-    ring_2d = _rounded_triangle_ring(half_w, _BACK_DEPTH, depth_front)
-    y_col = np.full(len(ring_2d), y)
-    return np.column_stack([ring_2d[:, 0], y_col, ring_2d[:, 1]])
+    return _ring_at_y(half_w, depth_front, y)
 
 
-def _loft_side_faces() -> list[list[int]]:
+def _loft_side_faces(num_rings: int) -> list[list[int]]:
     """隣接リング間を繋ぐ側面の三角形面を返す。"""
     faces = []
-    for k in range(_NUM_LOFT_RINGS - 1):
+    for k in range(num_rings - 1):
         ring_a = k * _NUM_RING_POINTS
         ring_b = (k + 1) * _NUM_RING_POINTS
         for i in range(_NUM_RING_POINTS):
@@ -240,10 +249,12 @@ def _loft_side_faces() -> list[list[int]]:
     return faces
 
 
-def _loft_cap_faces(bridge_center_idx: int, tip_center_idx: int) -> list[list[int]]:
+def _loft_cap_faces(
+    bridge_center_idx: int, tip_center_idx: int, num_rings: int
+) -> list[list[int]]:
     """鼻筋側・鼻先側の両端を、それぞれの中心点から扇状に閉じる面を返す。"""
     faces = []
-    tip_ring_start = (_NUM_LOFT_RINGS - 1) * _NUM_RING_POINTS
+    tip_ring_start = (num_rings - 1) * _NUM_RING_POINTS
     for i in range(_NUM_RING_POINTS):
         j = (i + 1) % _NUM_RING_POINTS
         faces.append([bridge_center_idx, j, i])
@@ -251,22 +262,57 @@ def _loft_cap_faces(bridge_center_idx: int, tip_center_idx: int) -> list[list[in
     return faces
 
 
+def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.ndarray]:
+    """鼻先の最終リング(半幅half_w・前面迫り出しdepth_front・位置y)から
+    キャップ面へ、四分円状に断面を窄めながらつなぐ追加リング群を返す。
+
+    これがないと、迫り出しきった側面にいきなり平らなキャップを被せる形に
+    なり、側面とキャップの境目が鋭いリムになってしまう(実際の鼻先は
+    側面から丸くつながって下面に至る)。_fillet_cornerと同様、円弧
+    (半径radius)で丸める考え方を3Dのリング列に適用している。
+    """
+    # insetの最大値(m=_NUM_TIP_FILLET_RINGSでradiusそのもの)がhalf_wや
+    # depth_frontを超えると、輪郭の前面頂点が背面の辺を越えて反転してしまう
+    # (winding反転。_safe_corner_radiusで対処した不具合と同じクラス)。
+    # tip_depth_frontが小さいパラメータで実際に再現するため、半幅・前面
+    # 迫り出しの小さい方を超えないよう安全マージンを掛けて制限する
+    margin = 0.9
+    radius = min(half_w * _TIP_FILLET_RADIUS_RATIO, min(half_w, depth_front) * margin)
+    rings = []
+    for m in range(1, _NUM_TIP_FILLET_RINGS + 1):
+        angle = (m / _NUM_TIP_FILLET_RINGS) * (np.pi / 2)
+        inset = radius * (1 - np.cos(angle))
+        ring_y = y - radius * np.sin(angle)
+        rings.append(_ring_at_y(half_w - inset, depth_front - inset, ring_y))
+    return rings
+
+
 def _build_body(params: NoseParams) -> trimesh.Trimesh:
-    """鼻筋(y=nose_len)から鼻先(y=0)へテーパーするロフト形状。
+    """鼻筋(y=nose_len)から鼻先(y=0)へテーパーし、鼻先はさらに丸めながら
+    キャップへつながるロフト形状(実際の頂点はy=0よりわずかに先まで続く)。
 
     幅(x)は鼻筋側で保たれ鼻先側で急に広がる非線形テーパー、奥行き(z)の
     前面は鼻筋から鼻先まで直線的に迫り出すテーパーにすることで、
     正面から見ても側面から見ても丸みを帯びた三角形のシルエットになる。
     """
-    ring_vertices = [_ring_at(params, k) for k in range(_NUM_LOFT_RINGS)]
-    bridge_center_idx = _NUM_LOFT_RINGS * _NUM_RING_POINTS
+    main_rings = [_ring_at(params, k) for k in range(_NUM_LOFT_RINGS)]
+    # 鼻先の最終リング(s=1, y=0)は幅・前面迫り出しともにtip_w/tip_depth_frontの
+    # 最大値になっている。これをそのままキャップすると縁が鋭くなるため、
+    # キャップ手前を丸める追加リングを繋ぐ
+    fillet_rings = _tip_fillet_rings(params.tip_w / 2, params.tip_depth_front, y=0.0)
+    ring_vertices = main_rings + fillet_rings
+    num_rings = len(ring_vertices)
+
+    bridge_center_idx = num_rings * _NUM_RING_POINTS
     tip_center_idx = bridge_center_idx + 1
+    # リング内の全点でyは共通なので、先頭の点から取り出せばよい
+    tip_y = ring_vertices[-1][0, 1]
     vertices = np.vstack(
-        ring_vertices + [[[0.0, params.nose_len, 0.0]], [[0.0, 0.0, 0.0]]]
+        ring_vertices + [[[0.0, params.nose_len, 0.0]], [[0.0, tip_y, 0.0]]]
     )
 
-    faces = _loft_side_faces()
-    faces += _loft_cap_faces(bridge_center_idx, tip_center_idx)
+    faces = _loft_side_faces(num_rings)
+    faces += _loft_cap_faces(bridge_center_idx, tip_center_idx, num_rings)
 
     return trimesh.Trimesh(vertices=vertices, faces=np.array(faces), process=True)
 
@@ -305,9 +351,9 @@ def _build_nostril(
     mesh.apply_transform(rotate)
 
     x_pos = side * gap / 2
-    # y=0の断面上に中心を置く。楕円体のちょうど半分がy<0(ボディの外)に
-    # はみ出す形になり、ブーリアン減算後に鼻先の下側を向いた自然な深さの
-    # 開口部になる
+    # y=0(鼻先の丸め処理に入る直前の断面)上に中心を置く。楕円体の半分弱が
+    # y<0側にはみ出す形になり、ブーリアン減算後に鼻先の下側を向いた
+    # 自然な深さの開口部になる
     y_pos = 0.0
     z_pos = -_BACK_DEPTH + (depth_front + _BACK_DEPTH) * _NOSTRIL_Z_RATIO
     mesh.apply_translation([x_pos, y_pos, z_pos])
