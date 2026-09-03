@@ -1,6 +1,11 @@
 [project]
-name = "hanasen"
+name = "opennose"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.2",
+    "pyglet<2",
+    "scipy>=1.18.1",
+    "trimesh>=5.1.0",
+]
