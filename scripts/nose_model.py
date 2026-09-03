@@ -62,10 +62,10 @@ class NoseParams:
     tip_w: float = 34.0
     tip_depth_front: float = 16.0
     nose_len: float = 45.0
-    nostril_a: float = 4.0
-    nostril_b: float = 2.5
-    nostril_gap: float = 8.0
-    nostril_tilt_deg: float = 35.0
+    nostril_a: float = 4.7
+    nostril_b: float = 2.9
+    nostril_gap: float = 7.0
+    nostril_tilt_deg: float = 58.0
 
     def __post_init__(self) -> None:
         # 幅・奥行き・長さが0以下だと、フィレット計算(タンジェント長や
