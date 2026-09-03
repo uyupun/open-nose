@@ -11,7 +11,7 @@
 $ uv sync
 
 # 鼻モデルを生成して output/nose.obj に出力
-$ uv run python scripts/nose_model.py
+$ uv run python scripts/export_model.py
 
 # 生成した鼻モデルをインタラクティブビューアで確認
 $ uv run python scripts/view_nose.py

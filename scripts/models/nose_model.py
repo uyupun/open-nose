@@ -1,10 +1,9 @@
-"""簡略化した鼻の幾何モデル(PROJECT.md の「モデル・変数・評価関数(暫定仕様 v0)」に対応)。
+"""簡略化した鼻本体の幾何モデル(PROJECT.md の「モデル・変数・評価関数(暫定仕様 v0)」に対応)。
 
 正確な人体計測データではなく、実験用の簡略近似。
 """
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -80,14 +79,6 @@ _NOSTRIL_DEPTH_RATIO = 2.0
 # 置いている。_BACK_DEPTHやtip_depth_frontを変更しても追従するよう、
 # 絶対値ではなく比率で持つ
 _NOSTRIL_Z_RATIO = 0.5
-# 鼻栓プレースホルダー(円柱)のy方向の配置オフセット(鼻孔中心からの
-# ずらし量、mm。正は鼻の内部方向、負は鼻先の外側方向)。鼻孔と同じく
-# y=0中心に置くと、円柱が鼻の表面(肌)から突き抜けて見えてしまう
-# (手前側にはみ出す、または奥に入りすぎて側面から突き抜けるなど)。
-# 断面が細長い楕円(鼻孔)と円柱の組み合わせのため、突き抜けるか
-# どうかは単純な数式では決めづらく、インタラクティブビューアでの
-# 目視確認を元に調整した値
-_PLUG_Y_OFFSET = -0.6
 
 
 @dataclass(frozen=True)
@@ -128,22 +119,13 @@ class NoseParams:
                 )
 
 
-@dataclass(frozen=True)
-class PlugParams:
-    """鼻栓本体の仮寸法パラメータ(単位: mm)。
+def nostril_depth_z(depth_front: float) -> float:
+    """鼻孔断面のz方向における配置位置を返す(_NOSTRIL_Z_RATIOによる内分)。
 
-    既製品を使う想定のプレースホルダーで、円柱として単純化している。
-    後から実際の製品寸法に合わせて調整する。
+    depth_frontにはtip_depth_front相当の値を渡す。鼻栓プレースホルダーも
+    同じ鼻孔位置に配置するため、models.plug_modelから参照される
     """
-
-    diameter: float = 6.0
-    length: float = 8.0
-
-    def __post_init__(self) -> None:
-        for name in ("diameter", "length"):
-            value = getattr(self, name)
-            if value <= 0:
-                raise ValueError(f"{name} は正の値にすること: {value}")
+    return -_BACK_DEPTH + (depth_front + _BACK_DEPTH) * _NOSTRIL_Z_RATIO
 
 
 def _unwrap_near(angle: float, reference: float) -> float:
@@ -506,37 +488,14 @@ def _build_nostril(
     # y<0側にはみ出す形になり、ブーリアン減算後に鼻先の下側を向いた
     # 自然な深さの開口部になる
     y_pos = 0.0
-    z_pos = -_BACK_DEPTH + (depth_front + _BACK_DEPTH) * _NOSTRIL_Z_RATIO
+    z_pos = nostril_depth_z(depth_front)
     mesh.apply_translation([x_pos, y_pos, z_pos])
 
     return mesh
 
 
-def _build_plug(
-    plug: PlugParams, gap: float, depth_front: float, side: Literal[-1, 1]
-) -> trimesh.Trimesh:
-    """鼻栓本体(円柱)のプレースホルダーを、指定側の鼻孔位置に配置する。
-
-    鼻孔の深さ方向は_nostril_ellipsoidと同じy軸(鼻先から鼻の内部へ向かう
-    向き)。trimesh.creation.cylinderの既定の軸はzなので、x軸まわりに
-    90度回転させてyに揃える。x_pos・z_posは_build_nostrilと同じ考え方で
-    鼻孔の中心に合わせる(circular断面のため、ハの字の傾き自体は円柱の
-    見た目に影響しない)。y方向だけは_PLUG_Y_OFFSET分ずらす(下記参照)
-    """
-    mesh = trimesh.creation.cylinder(radius=plug.diameter / 2, height=plug.length)
-    rotate_to_y = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
-    mesh.apply_transform(rotate_to_y)
-
-    x_pos = side * gap / 2
-    z_pos = -_BACK_DEPTH + (depth_front + _BACK_DEPTH) * _NOSTRIL_Z_RATIO
-    mesh.apply_translation([x_pos, _PLUG_Y_OFFSET, z_pos])
-
-    return mesh
-
-
-def build_nose_scene() -> trimesh.Scene:
-    params = NoseParams()
-
+def build_nose_body(params: NoseParams) -> trimesh.Trimesh:
+    """鼻本体メッシュを構築する(左右の鼻孔をくり抜き、着色済み)。"""
     body = _build_body(params)
     base_ellipsoid = _nostril_ellipsoid(params)
     left, right = (
@@ -573,34 +532,4 @@ def build_nose_scene() -> trimesh.Scene:
             "(euler_number != 2)。tip_wやnostril_a/b/gapを見直すこと"
         )
     body.visual.face_colors = [255, 220, 200, 255]
-
-    plug = PlugParams()
-    plug_left, plug_right = (
-        _build_plug(
-            plug, gap=params.nostril_gap, depth_front=params.tip_depth_front, side=side
-        )
-        for side in (-1, 1)
-    )
-    plug_left.visual.face_colors = [120, 160, 220, 200]
-    plug_right.visual.face_colors = [120, 160, 220, 200]
-
-    return trimesh.Scene(
-        {"body": body, "plug_left": plug_left, "plug_right": plug_right}
-    )
-
-
-def main() -> None:
-    scene = build_nose_scene()
-
-    out_dir = Path("output")
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / "nose.obj"
-    scene.export(out_path)
-
-    print(f"exported: {out_path}")
-    for name, geom in scene.geometry.items():
-        print(f"  {name}: {len(geom.vertices)} verts, {len(geom.faces)} faces")
-
-
-if __name__ == "__main__":
-    main()
+    return body
