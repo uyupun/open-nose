@@ -43,7 +43,7 @@ _TIP_BUMP_RATIO = 0.3
 _TIP_BUMP_SPAN = 9.0
 # 鼻翼(鼻孔まわりの張り出し)による半幅への追加量を、tip_w/2に対する
 # 比率で指定
-_ALAE_BUMP_RATIO = 0.35
+_ALAE_BUMP_RATIO = 0.1
 # 鼻翼の張り出しが効くy方向の範囲(鼻先中心からの距離、mm)
 _ALAE_BUMP_SPAN = 6.0
 # 鼻孔楕円体のy方向(鼻先から鼻の内部へ向かう、穴としての深さ方向。
@@ -57,7 +57,7 @@ _NOSTRIL_DEPTH_RATIO = 2.0
 # 寄せすぎると背面から突き抜けるため、その中間で前寄りの位置にしている。
 # _BACK_DEPTHやtip_depth_frontを変更しても追従するよう、絶対値ではなく
 # 比率で持つ
-_NOSTRIL_Z_RATIO = 0.47
+_NOSTRIL_Z_RATIO = 0.58
 
 
 @dataclass(frozen=True)
@@ -70,13 +70,13 @@ class NoseParams:
 
     bridge_w: float = 20.0
     bridge_depth_front: float = 4.0
-    tip_w: float = 34.0
+    tip_w: float = 30.0
     tip_depth_front: float = 16.0
     nose_len: float = 45.0
-    nostril_a: float = 4.7
-    nostril_b: float = 2.9
+    nostril_a: float = 5.0
+    nostril_b: float = 3.1
     nostril_gap: float = 7.0
-    nostril_tilt_deg: float = 58.0
+    nostril_tilt_deg: float = 66.0
 
     def __post_init__(self) -> None:
         # 幅・奥行き・長さが0以下だと、フィレット計算(タンジェント長や
@@ -434,6 +434,15 @@ def build_nose_scene() -> trimesh.Scene:
         raise ValueError(
             "鼻孔のブーリアン減算でボディが消失した。"
             "nostril_a/nostril_b/nostril_gapが大きすぎる可能性がある"
+        )
+    # 鼻孔の窪みが側面や背面まで突き抜けると、くぼみ(トポロジー的には
+    # 球のまま)ではなくトンネル(貫通穴)になり、閉曲面のオイラー数が
+    # 2からずれる。tip_wを鼻孔サイズに対して狭めすぎたときに実際に
+    # 再現したため検出する
+    if body.euler_number != 2:
+        raise ValueError(
+            "鼻孔が側面や背面まで突き抜けている可能性がある"
+            "(euler_number != 2)。tip_wやnostril_a/b/gapを見直すこと"
         )
     body.visual.face_colors = [255, 220, 200, 255]
 
