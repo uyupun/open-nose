@@ -15,12 +15,20 @@ import trimesh
 _NUM_TRIANGLE_CORNERS = 3
 # 角丸三角形の1つの角に使う点数(多いほど滑らかになる)
 _POINTS_PER_CORNER = 11
+# 背面2角を結ぶ辺を、直線ではなく中央が前方へ膨らむカーブに置き換える
+# ための点数。実際の鼻の断面は単純な三角形ではなく、背面の中腹(鼻中隔
+# のあたり)がへこんだブーメラン型に近いため
+_BOOMERANG_POINTS = 11
 # 輪郭生成に使う点数の合計。全ての角に均等に配分されるよう、
 # _NUM_RING_POINTSを独立した値にはせず_POINTS_PER_CORNERから導出する
-# (assertではなく構成上ズレが起きないようにするため)
-_NUM_RING_POINTS = _POINTS_PER_CORNER * _NUM_TRIANGLE_CORNERS
+# (assertではなく構成上ズレが起きないようにするため)。ブーメランのカーブは
+# 両端が背面角のフィレット終点と重複するため、重複を除いた分だけ加える
+_NUM_RING_POINTS = _POINTS_PER_CORNER * _NUM_TRIANGLE_CORNERS + (_BOOMERANG_POINTS - 2)
 # 角丸三角形の角の丸め半径を、半幅(half_width)に対する比率で指定
 _CORNER_ROUNDNESS_RATIO = 0.3
+# 背面の中腹をへこませる量(カーブの高さ)を、その断面のdepth_backに
+# 対する比率で指定
+_BOOMERANG_BOW_RATIO = 0.75
 # ボディのロフトに使うリング数(鼻筋〜鼻先の間を何段でつなぐか)
 _NUM_LOFT_RINGS = 8
 # 幅(x)テーパーの非線形度。1より大きいと鼻筋側は幅を保ち、鼻先側で急に
@@ -205,6 +213,26 @@ def _safe_corner_radius(
     return radius
 
 
+def _boomerang_bow(
+    x_start: float, x_end: float, z: float, bow_depth: float, num_points: int
+) -> np.ndarray:
+    """(x_start, z)から(x_end, z)へ、中央がbow_depthだけ前方(+z方向)に
+    膨らむ余弦カーブの点列を返す。
+
+    実際の鼻の断面は背面が平らな三角形ではなく、背面の中腹(鼻中隔の
+    あたり)がへこんだブーメラン型に近いため、背面2角を結ぶ直線をこの
+    カーブに置き換える。単純な円弧(弦の両端と中央の膨らみ量から求める
+    もの)だと、両端での接線が隣接する角丸フィレットの接線(水平)と
+    一致せず、繋ぎ目で傾きが不連続になり縁が鋭く見えてしまう。
+    _localized_bumpと同じ余弦カーブは両端で傾きがちょうど0になるため、
+    フィレットの接線に滑らかに繋がる。
+    """
+    t = np.linspace(0.0, 1.0, num_points)
+    x = x_start + (x_end - x_start) * t
+    bow_z = z + bow_depth * 0.5 * (1 - np.cos(2 * np.pi * t))
+    return np.stack([x, bow_z], axis=1)
+
+
 def _rounded_triangle_ring(
     half_width: float, depth_back: float, depth_front: float
 ) -> np.ndarray:
@@ -212,7 +240,8 @@ def _rounded_triangle_ring(
 
     背面(depth_back)側の2頂点を底辺、前面(depth_front)側の1頂点を頂点とする
     三角形の角を丸めることで、鼻の前後非対称な断面(背面は平ら、前面だけ
-    尖って迫り出す)を三角柱に近い構造で表現する。
+    尖って迫り出す)を三角柱に近い構造で表現する。ただし背面2角を結ぶ辺は
+    直線ではなく、中腹がへこむブーメラン型のカーブにしている(_boomerang_bow)。
     """
     vertices = np.array(
         [[-half_width, -depth_back], [half_width, -depth_back], [0.0, depth_front]]
@@ -238,7 +267,23 @@ def _rounded_triangle_ring(
         )
         for i in range(num_corners)
     ]
-    return np.concatenate(arcs, axis=0)
+
+    # arcs[0](背面左角)の終点とarcs[1](背面右角)の始点は、どちらも
+    # 元の直線の背面辺の上にある。その間を、へこんだカーブで置き換える。
+    # 両端は既存の点と重複するので[1:-1]で除く
+    back_left_end = arcs[0][-1]
+    back_right_start = arcs[1][0]
+    # 背面角のフィレットが辺の大部分を消費する断面(半幅が広く前面の
+    # 迫り出しが浅いなど)では、残り幅が狭いのに深さが固定のままだと
+    # 幅に対して尖ったスパイク状になってしまう。半弦長に対する比率で
+    # 深さの上限を設け、細くなるほどへこみも浅くする
+    half_chord = (back_right_start[0] - back_left_end[0]) / 2
+    bow_depth = min(depth_back * _BOOMERANG_BOW_RATIO, half_chord * 0.5)
+    bow = _boomerang_bow(
+        back_left_end[0], back_right_start[0], -depth_back, bow_depth, _BOOMERANG_POINTS
+    )[1:-1]
+
+    return np.concatenate([arcs[0], bow, arcs[1], arcs[2]], axis=0)
 
 
 def _localized_bump(y: float, span: float, reference: float, ratio: float) -> float:
