@@ -524,6 +524,16 @@ def validate_grip_ring(
         )
 
 
+def holder_radius(frame: FrameParams) -> float:
+    """保持部(先端の球)の実際の半径を返す。build_frame_pairが球を生成する
+    際の計算式そのもの。scripts/evaluation.pyが保持部の絶対サイズ
+    (鼻栓本体に対して大きすぎないか)を制約として評価する際、
+    _HOLDER_RADIUS_RATIOを直接importして再計算するのではなくこの関数を
+    経由することで、実際に生成される球の半径と評価対象を一致させる。
+    """
+    return frame.arm_thickness * _HOLDER_RADIUS_RATIO
+
+
 def build_frame_pair(
     frame: FrameParams, plug: PlugParams, params: NoseParams
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
@@ -542,9 +552,7 @@ def build_frame_pair(
     for points, path in sides:
         arm_mesh = _polyline_mesh(points, radius)
         connector_mesh = _polyline_mesh(path, radius)
-        holder = trimesh.creation.icosphere(
-            subdivisions=2, radius=frame.arm_thickness * _HOLDER_RADIUS_RATIO
-        )
+        holder = trimesh.creation.icosphere(subdivisions=2, radius=holder_radius(frame))
         holder.apply_translation(path[-1])
 
         combined = trimesh.util.concatenate([arm_mesh, connector_mesh, holder])

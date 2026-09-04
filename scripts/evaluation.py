@@ -1,4 +1,4 @@
-"""フレームの評価関数(v3: 機能性・快適さ・意匠性の3目的+7制約)。
+"""フレームの評価関数(v3: 機能性・快適さ・意匠性の3目的+8制約)。
 PROJECT.md の「評価関数」に対応。
 
 frame_model.build_frame_pair が作る円柱メッシュを経由せず、経路の点列
@@ -70,6 +70,7 @@ from models.frame_model import (
     build_side_paths,
     grip_depth_margin,
     grip_ring_margin,
+    holder_radius,
     surface_following_points,
     validate_anchor_height,
     validate_target_reach,
@@ -86,6 +87,16 @@ _MIN_THICKNESS_RATIO = 0.03
 # retention・プロポーション評価(上限)で、arm_thicknessの寄与を頭打ちに
 # する基準。plug.diameterに対する倍率(理由は上のモジュールdocstring参照)
 _MAX_THICKNESS_TO_PLUG_DIAMETER = 1.0
+# 保持部(先端の球、models.frame_model.holder_radius)の直径の上限。
+# plug.diameterに対する倍率(_MAX_THICKNESS_TO_PLUG_DIAMETERと同じ、直径
+# 同士の比率で揃えている)。arm_thicknessをretention目当てで太くすると
+# 保持部の球(半径はarm_thicknessに比例)も連動して膨らみ、鼻栓本体
+# よりも大きなドーム状の突起になってしまう(実際にNSGA-IIの結果で
+# 確認された)。retentionのarm_thickness頭打ちと同じ発想で、挟んでいる
+# 相手(鼻栓)より保持部が大きくなる理由はないとみなし、直径がplug.diameter
+# (=鼻栓と同じ直径)を超えた分を罰則にする。デフォルト設定の保持部直径
+# (arm_thickness=2.0×_HOLDER_RADIUS_RATIO×2=5.6mm)はこの基準内に収まる
+_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER = 1.0
 
 
 def _retention(frame: FrameParams, plug: PlugParams) -> float:
@@ -203,12 +214,23 @@ def _proportion_penalty(
     return max(penalties)
 
 
+def _holder_size_penalty(frame: FrameParams, plug: PlugParams) -> float:
+    """保持部(先端の球)のサイズの破綻(制約)。実際の球の直径
+    (models.frame_model.holder_radiusの2倍)がplug.diameter基準の上限
+    (_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER)を超えた分を罰則にする(上限内は0)。
+    上限の考え方はモジュール上部の定数コメント参照(_proportion_penaltyの
+    太さ上限と同じ、挟んでいる相手より大きくなる理由はないという発想)。
+    """
+    max_diameter = plug.diameter * _MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER
+    return max(0.0, 2 * holder_radius(frame) - max_diameter)
+
+
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約7つ。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約8つ。モジュールdocstring参照)。
 
     目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
-    retentionのみ最大化、他は最小化。制約(reach_gap以下の7項目)は
+    retentionのみ最大化、他は最小化。制約(reach_gap以下の8項目)は
     実行不可能個体を除外するための値で、いずれも0または一定値以下で
     あるべき(わざと悪化させて選ぶ理由がない)。実際の閾値判定は
     未実装で、生の値のまま返す(モジュールdocstring参照)。
@@ -224,7 +246,7 @@ class FrameScore:
     retention: float  # 機能性(最大化)
     pain: float  # 快適さ(最小化)
     fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
-    # 制約(7つ。すべて0または一定値以下であるべき)
+    # 制約(8つ。すべて0または一定値以下であるべき)
     reach_gap: float  # 保持部が鼻栓の露出端に届いているか(0であるべき)
     fit_gap_max: float  # 局所的な浮きの最悪点(閾値: _FIT_GAP_MAX_THRESHOLD)
     smoothness: float  # 経路の折れの急峻さ(閾値: _SMOOTHNESS_THRESHOLD_DEG)
@@ -232,13 +254,16 @@ class FrameScore:
     grip_depth_margin: float  # 起点が鼻の厚みを超えていないか(0以下であるべき)
     arm_clearance_margin: float  # 表面沿い区間のめり込み量(0以下であるべき)
     grip_ring_margin: float  # 起点断面の側方への突き出し量(0以下であるべき)
+    holder_size_penalty: float  # 保持部の球のサイズの破綻(0であるべき)
 
 
-# 制約の閾値。7項目のうち5項目(reach_gap/proportion_penalty/
-# grip_depth_margin/arm_clearance_margin/grip_ring_margin)は0以下が
-# 合格ラインになるよう既に設計されているため、判断が必要な実質的な閾値は
-# fit_gap_max・smoothnessの2つだけ。いずれも仮置きで、NSGA-IIを実際に
-# 動かし、生成される候補フレームを見ながら見直す前提
+# 制約の閾値。8項目のうち6項目(reach_gap/proportion_penalty/
+# grip_depth_margin/arm_clearance_margin/grip_ring_margin/
+# holder_size_penalty)は0以下が合格ラインになるよう既に設計されている
+# (holder_size_penaltyの閾値_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETERは
+# モジュール上部の定数コメント参照)ため、constraint_values側で判断が
+# 必要な実質的な閾値はfit_gap_max・smoothnessの2つだけ。いずれも仮置きで、
+# NSGA-IIを実際に動かし、生成される候補フレームを見ながら見直す前提
 
 # 0以下が合格ラインの制約に共通で使う、浮動小数点誤差を吸収するための
 # ごく小さな余裕(mm、または比率)。境界ぎりぎりの計算結果が誤差でわずかに
@@ -260,10 +285,10 @@ _SMOOTHNESS_THRESHOLD_DEG = 120.0
 
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
-    """FrameScoreの7つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    """FrameScoreの8つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
 
-    すでに0以下が合格ラインの5項目は_MARGIN_EPSILONを引くだけ(境界の
+    すでに0以下が合格ラインの6項目は_MARGIN_EPSILONを引くだけ(境界の
     誤差吸収)。fit_gap_max・smoothnessは実際の閾値を引く。
     """
     return (
@@ -274,6 +299,7 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.grip_depth_margin - _MARGIN_EPSILON,
         score.arm_clearance_margin - _MARGIN_EPSILON,
         score.grip_ring_margin - _MARGIN_EPSILON,
+        score.holder_size_penalty - _MARGIN_EPSILON,
     )
 
 
@@ -315,4 +341,5 @@ def evaluate_frame(
         grip_depth_margin=grip_depth_margin(frame, params),
         arm_clearance_margin=arm_clearance_margin(sides, body, frame.arm_thickness),
         grip_ring_margin=grip_ring_margin(frame, params, body),
+        holder_size_penalty=_holder_size_penalty(frame, plug),
     )
