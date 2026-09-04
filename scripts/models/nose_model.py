@@ -3,6 +3,7 @@
 正確な人体計測データではなく、実験用の簡略近似。
 """
 
+import functools
 from dataclasses import dataclass
 from typing import Literal
 
@@ -597,8 +598,15 @@ def _build_nostril(
     return mesh
 
 
-def build_nose_body(params: NoseParams) -> trimesh.Trimesh:
-    """鼻本体メッシュを構築する(左右の鼻孔をくり抜き、着色済み)。"""
+# build_nose_bodyのキャッシュ数の上限。NoseParamsは現状のNSGA-II計画では
+# 固定(FrameParamsだけが探索変数)だが、将来複数の鼻モデルを比較する
+# ケースに備えて2以上にしておく
+_NOSE_BODY_CACHE_SIZE = 8
+
+
+@functools.lru_cache(maxsize=_NOSE_BODY_CACHE_SIZE)
+def _build_nose_body_cached(params: NoseParams) -> trimesh.Trimesh:
+    """build_nose_bodyの実体(キャッシュされる側)。"""
     body = _build_body(params)
     base_ellipsoid = _nostril_ellipsoid(params)
     left, right = (
@@ -636,3 +644,21 @@ def build_nose_body(params: NoseParams) -> trimesh.Trimesh:
         )
     body.visual.face_colors = [255, 220, 200, 255]
     return body
+
+
+def build_nose_body(params: NoseParams) -> trimesh.Trimesh:
+    """鼻本体メッシュを構築する(左右の鼻孔をくり抜き、着色済み)。
+
+    実体(_build_nose_body_cached)は鼻孔のブーリアン減算を含む、この
+    モジュールで最も重い処理であり、functools.lru_cacheでキャッシュ
+    している(NoseParamsはfrozen dataclassなのでハッシュ可能)。
+    scripts/evaluation.pyのevaluate_frameが個体ごとに呼び出す用途を
+    想定しており、NoseParamsが同じであれば(NSGA-IIの現行計画では
+    FrameParamsだけが探索変数なので、GAの実行中は常に同じ)再構築を
+    避けられる。
+    ただしキャッシュされたメッシュへの参照をそのまま返すと、呼び出し側が
+    apply_translation等でその場を書き換えた場合に他の呼び出し元まで
+    汚染してしまう。それを避けるため、ここで必ずcopy()した新しいメッシュ
+    を返す(頂点・面配列の複製はブーリアン減算の再計算よりずっと軽い)。
+    """
+    return _build_nose_body_cached(params).copy()

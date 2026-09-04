@@ -7,6 +7,7 @@ dependencies = [
     "manifold3d>=3.5.2",
     "numpy>=2.5.2",
     "pyglet<2",
+    "rtree>=1.4.1",
     "scipy>=1.18.1",
     "trimesh>=5.1.0",
 ]

@@ -269,15 +269,20 @@ def _signed_distance_to_body(
 ) -> np.ndarray:
     """各点から鼻本体表面までの符号付き距離を返す(正=外側、負=内側/めり込み)。
 
-    trimesh.proximity.closest_point_naiveは符号なし距離しか返さないため、
+    trimesh.proximity.closest_pointは符号なし距離しか返さないため、
     「表面のすぐ近くにいる(安全)」と「わずかにめり込んでいる(危険)」を
     区別できない。最近接点の三角形の法線と、その点から問い合わせ点への
-    向きの内積の符号を使って外側/内側を判定する(rtreeが必要な
-    body.contains()を使わずに済む、疑似法線による符号付き距離)。
+    向きの内積の符号を使って外側/内側を判定する(疑似法線による符号付き
+    距離。body.contains()のような別のアルゴリズムに切り替えるのではなく、
+    この判定方法自体は複数回のレビューで正しさを確認済みのため維持する)。
+
+    closest_point(rtreeによる空間索引を使う高速版)を使う。総当たりの
+    closest_point_naiveは、evaluate_frameを繰り返し呼び出す用途(GA)では
+    支配的なボトルネックになることが実測で判明した(1回あたり約0.7秒)。
+    closest_pointは同じ最近接点探索を高速化するだけで結果は変わらない
+    (実測で全点について両者の距離・最近接点が完全一致することを確認済み)。
     """
-    closest, distance, triangle_id = trimesh.proximity.closest_point_naive(
-        body, points
-    )
+    closest, distance, triangle_id = trimesh.proximity.closest_point(body, points)
     normals = body.face_normals[triangle_id]
     direction = points - closest
     sign = np.sign(np.einsum("ij,ij->i", direction, normals))
@@ -402,6 +407,18 @@ def arm_clearance_margin(
     実際にめり込みが起きていたのはこの関数の対象外である起点(意図的な
     grip_depthのめり込み)側で、半径を考慮していなかったgrip_depth_margin
     の不備だった。そちらを別途修正済み)。
+
+    その後、evaluate_frameを繰り返し呼び出すベンチマークで、この関数が
+    全体の実行時間の大半(1回あたり約1.8秒)を占めていることが判明した。
+    改善案として(a)中心点まわりにx-z平面内で円をサンプルする(円柱
+    メッシュを生成しない)方式、(b)円柱の円周分割数を減らす方式を試したが、
+    どちらも実測で既定値の計算結果からずれ(前者は経路が傾いた区間で
+    断面の向きがズレる、後者は円周方向のサンプルが粗くなり実際の違反を
+    見逃す例が確認できた。128通りのパラメータで比較したところ符号が
+    反転する=違反を見逃すケースが実在した)、正確さを犠牲にする近似だった
+    ため採用を見送った。代わりに_signed_distance_to_body側の距離計算を
+    rtree(空間索引)で高速化する方式を採用した(このモジュールの計算内容
+    は一切変えず、同じ計算を速くしただけなので近似ではない)。
     """
     radius = arm_thickness / 2
     worst = -np.inf

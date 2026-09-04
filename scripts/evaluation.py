@@ -131,11 +131,15 @@ def _fit_gap(
     arm_thickness/2の分だけ余分に浮かせているのと対になる補正)。
     curvature等により半径分を引いた値がわずかに負になりうるため0で
     クランプする。
+
+    closest_point(rtreeによる空間索引を使う高速版)を使う。総当たりの
+    closest_point_naiveより速く、結果は変わらない(frame_model.
+    _signed_distance_to_bodyのdocstring参照)。
     """
     means, maxes = [], []
     for points, path in sides:
         surface_points = surface_following_points(points, path)
-        _, distance, _ = trimesh.proximity.closest_point_naive(body, surface_points)
+        _, distance, _ = trimesh.proximity.closest_point(body, surface_points)
         tube_distance = np.maximum(distance - arm_thickness / 2, 0.0)
         means.append(float(np.mean(tube_distance)))
         maxes.append(float(np.max(tube_distance)))
