@@ -392,8 +392,13 @@ def back_surface_z_at_center(params: NoseParams, y: float) -> float:
     弧, 前面角の弧]の順に連結されている(_rounded_triangle_ring参照)。x=0に
     近い点を探す範囲を先頭3ブロック(背面側、末尾の前面角の弧を除く)に
     限定することで、前面角の弧の点を誤って拾わないようにしている。
+
+    surface_profileの代わりにsurface_profile_atを使う(鼻先の丸め区間
+    (y<0)でも正しい半幅・前面迫り出しを得るため。surface_profile_atの
+    docstring参照)。frame_model.grip_depth_marginがアーム全区間(y<0を
+    含みうる)の各点で背面境界を検証するために使う。
     """
-    half_width, depth_back, depth_front = surface_profile(params, y)
+    half_width, depth_back, depth_front = surface_profile_at(params, y)
     ring = _rounded_triangle_ring(half_width, depth_back, depth_front)
     return _z_at_center(ring[:-_POINTS_PER_CORNER])
 
@@ -413,10 +418,45 @@ def front_surface_z_at_center(params: NoseParams, y: float) -> float:
     フィレット弧にあたる(_rounded_triangle_ring参照)。back_surface_z_at_
     centerと同様、リング全体でx=0に近い点を探すと稀に背面のブーメラン
     カーブ側の点を誤って拾うことがあるため、前面角の弧だけに限定する。
+
+    surface_profileの代わりにsurface_profile_atを使う(鼻先の丸め区間
+    (y<0)でも正しい半幅・前面迫り出しを得るため。surface_profile_atの
+    docstring参照)。models.frame_model.arm_pointsがアーム全区間(y<0を
+    含みうる)の各点をこの関数から埋め込むために使う。
     """
-    half_width, depth_back, depth_front = surface_profile(params, y)
+    half_width, depth_back, depth_front = surface_profile_at(params, y)
     ring = _rounded_triangle_ring(half_width, depth_back, depth_front)
     return _z_at_center(ring[-_POINTS_PER_CORNER:])
+
+
+def front_surface_z_at_offset(params: NoseParams, y: float, x: float) -> float:
+    """指定したy, xにおける前面境界の近似z座標を返す(x=0の実測値を起点にした
+    直線近似)。
+
+    front_surface_z_at_centerはx=0専用(フィレット済みリングの実測値)。
+    x=0から離れた点には対応する実測手段がないため、front_surface_z_at_center
+    (x=0、フィレット済みで最も正確)から背面角(±half_width, -depth_back。
+    丸め処理前の頂点)へ向けて線形補間して近似する。
+
+    当初は起点にfront_surface_z_at_centerではなく丸め処理前の頂点
+    (depth_front)を使っていたが、depth_frontはフィレットによる後退
+    (既定値でy=6mm付近で約1.66〜2.1mm、yが鼻先に近づくほど増える)を
+    反映しておらず、models.frame_model.arm_pointsがアーム全体をこの値から
+    grip_depthだけ埋め込む用途で使うと、その分だけ埋め込みが浅くなり
+    (実際の表面より外側に留まり)、grip_ring_marginが誤って違反を検出する
+    不具合があった(clip_angleが小さいほどxが0に近く、この誤差の影響が
+    大きい)。front_surface_z_at_centerを起点にすることで、x=0での連続性を
+    保証しつつ、xが大きくなるにつれて丸め処理前の背面角(こちらはフィレットの
+    影響が相対的に小さい遠方の近似として許容)へ近づく形にした。
+
+    half_width/depth_backはsurface_profileの代わりにsurface_profile_atを
+    使う(鼻先の丸め区間(y<0)でも正しい値を得るため。arm_length>
+    _ARM_ANCHOR_Yのとき、アームの下端側はy<0に入りうる)。
+    """
+    half_width, depth_back, _ = surface_profile_at(params, y)
+    center_z = front_surface_z_at_center(params, y)
+    t = min(abs(x) / half_width, 1.0)
+    return center_z - t * (center_z + depth_back)
 
 
 def _ring_at(params: NoseParams, k: int) -> np.ndarray:
@@ -478,6 +518,18 @@ def tip_cap_min_y(params: NoseParams) -> float:
     return -radius
 
 
+def _tip_cap_inset(params: NoseParams, y: float) -> float:
+    """鼻先の丸め区間([tip_cap_min_y(params), 0])における、丸めによる
+    窄まり量(inset)を返す。tip_cap_depth_front/tip_cap_half_widthの両方が
+    同じ丸め(_tip_fillet_rings)から共通で導出する計算のため切り出した。
+    """
+    half_w = params.tip_w / 2
+    depth_front = params.tip_depth_front
+    radius = _tip_fillet_radius(half_w, depth_front)
+    angle = np.arcsin(np.clip(-y / radius, -1.0, 1.0))
+    return radius * (1 - np.cos(angle))
+
+
 def tip_cap_depth_front(params: NoseParams, y: float) -> float:
     """鼻先の丸め区間([tip_cap_min_y(params), 0])における前面迫り出しの
     実測値を返す。
@@ -490,12 +542,36 @@ def tip_cap_depth_front(params: NoseParams, y: float) -> float:
     surface_profileの延長値より正確(かつより小さい、鼻に近い)値を
     得るために使う
     """
-    half_w = params.tip_w / 2
     depth_front = params.tip_depth_front
-    radius = _tip_fillet_radius(half_w, depth_front)
-    angle = np.arcsin(np.clip(-y / radius, -1.0, 1.0))
-    inset = radius * (1 - np.cos(angle))
-    return depth_front - inset + _tip_bump(y, depth_front)
+    return depth_front - _tip_cap_inset(params, y) + _tip_bump(y, depth_front)
+
+
+def tip_cap_half_width(params: NoseParams, y: float) -> float:
+    """鼻先の丸め区間([tip_cap_min_y(params), 0])における半幅の実測値を返す。
+
+    tip_cap_depth_frontと同じ丸め処理(_tip_fillet_rings)を半幅にも
+    適用したもの(_tip_fillet_ringsのring_half_w計算と同じ式)。
+    surface_profile_atが鼻先付近でsurface_profileの延長値の代わりに使う。
+    """
+    half_w = params.tip_w / 2
+    return half_w - _tip_cap_inset(params, y) + _alae_bump(y, half_w)
+
+
+def surface_profile_at(params: NoseParams, y: float) -> tuple[float, float, float]:
+    """指定したyにおける鼻表面の断面プロファイル(半幅, 背面奥行き, 前面迫り出し)
+    を返す。surface_profileの拡張版で、鼻先の丸め区間(y<0)ではtip_cap_*を
+    使う(surface_profileの延長では丸め処理による窄まりが反映されないため。
+    frame_model._depth_front_atが前面迫り出しだけに対して行っている切り替え
+    を、半幅・背面奥行きも含めた3値に広げたもの)。前面迫り出しはtip_cap_
+    depth_front、半幅はtip_cap_half_width、背面奥行きは_BACK_DEPTH(この
+    区間は鼻根から十分離れており_root_waist_depth_bumpの影響を受けない
+    ため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
+    models.frame_model.front_surface_z_at_offsetが鼻先近くまでアームを
+    伸ばす(arm_length>_ARM_ANCHOR_Y)場合に、正しい表面位置を得るために使う。
+    """
+    if y >= 0:
+        return surface_profile(params, y)
+    return tip_cap_half_width(params, y), _BACK_DEPTH, tip_cap_depth_front(params, y)
 
 
 def _tip_fillet_rings(half_w: float, depth_front: float, y: float) -> list[np.ndarray]:

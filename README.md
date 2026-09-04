@@ -20,8 +20,8 @@ $ uv run python scripts/view_nose.py
 $ uv run python scripts/optimize.py
 
 # 上の表から選んだ候補(clip_angle等の5変数)をglTF(.glb)に出力(base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
-$ uv run python scripts/export_frame.py --clip-angle 46.33 --arm-length 7.10 --arm-thickness 6.00 --holder-offset 11.41 --grip-depth 8.00
+$ uv run python scripts/export_frame.py --clip-angle 5.74 --arm-length 10.25 --arm-thickness 2.13 --holder-offset 8.59 --grip-depth 0.63
 
 # 出力した候補(export_frame.pyの出力等、任意のOBJ/glTFファイル)をインタラクティブビューアで確認
-$ uv run python scripts/view_nose.py output/candidate_best_fit.glb
+$ uv run python scripts/view_nose.py output/candidate_balanced.glb
 ```

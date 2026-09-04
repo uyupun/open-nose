@@ -56,6 +56,27 @@ proportion_penaltyの上限も長さとの自己参照的な比率ではなく�
 本体よりも太くなる理由はなく、それを超えて太くしても保持力の向上には
 寄与しない(=挟んでいる相手より太いクリップは、太さの分だけ無駄という
 考え方)とみなす。
+
+## retentionにarm_lengthを掛ける理由(アーチ型保持構造への変更)
+
+NSGA-IIの実行結果をユーザーがレビューしたところ、パレート最適とされた
+候補でアームが終始鼻表面から浮いており(実際に接触しているのは起点1点
+だけ)、メガネのように鼻翼・鼻尖の少し上をアーチ状に挟むほうが実際には
+落ちにくいはず、という指摘を受けた。
+
+調査の結果、原因はmodels.frame_model.arm_pointsの幾何バグだった。起点
+(x=0)だけは鼻表面へ正しくめり込ませていたが、それ以外の点はclip_angleで
+外側(x≠0)へ開いていくにもかかわらず、x=0での前面最大値を安全マージンと
+して使っていたため、実際の表面(xが0から離れるほど後退する)から乖離して
+浮いていた(models.frame_model.arm_pointsのdocstring参照)。これを修正し、
+アーム全体をgrip_depthで鼻表面へ沿わせるようにした。
+
+アーム全体が接触区間になったことで、接触面積の代理指標としてretentionに
+arm_length(接触区間の長さ)を掛けるようにした(メガネのアームが長く沿う
+ほど落ちにくいのと同じ発想)。これにより、evaluate_frameがarm_lengthを
+評価しないためGAの探索でarm_lengthが下限に張り付いていた既知の限界
+(PROJECT.md参照)も同時に解消され、実際にNSGA-IIを動かすとarm_lengthが
+トレードオフとして分布するようになったことを確認した。
 """
 
 from dataclasses import dataclass
@@ -100,14 +121,17 @@ _MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER = 1.0
 
 
 def _retention(frame: FrameParams, plug: PlugParams) -> float:
-    """保持力(機能性、最大化)。grip_depth(めり込み量)×arm_thickness(剛性)。
-    arm_thicknessの寄与はplug.diameterで頭打ちにする(理由はモジュール
+    """保持力(機能性、最大化)。grip_depth(めり込み量)×arm_thickness(剛性)×
+    arm_length(接触区間の長さ)。アーム全体がgrip_depthで鼻表面に沿う
+    (models.frame_model.arm_points参照)ため、接触面積の代理指標として
+    arm_lengthも乗じる(メガネのアームが長く沿うほど落ちにくいのと同じ
+    発想)。arm_thicknessの寄与はplug.diameterで頭打ちにする(理由はモジュール
     docstring参照)。clip_angleを含めない理由も同docstring参照。
     """
     effective_thickness = min(
         frame.arm_thickness, plug.diameter * _MAX_THICKNESS_TO_PLUG_DIAMETER
     )
-    return frame.grip_depth * effective_thickness
+    return frame.grip_depth * effective_thickness * frame.arm_length
 
 
 def _pain(frame: FrameParams) -> float:
@@ -131,14 +155,16 @@ def _reach_gap(sides: list[SidePaths], targets: list[np.ndarray]) -> float:
 def _fit_gap(
     sides: list[SidePaths], body: trimesh.Trimesh, arm_thickness: float
 ) -> tuple[float, float]:
-    """視覚的一体感。表面沿い区間の"円柱表面"から鼻本体表面までの距離の
-    (平均, 最悪点)を返す。値が小さいほど顔に馴染んで見える。平均は目的
-    (fit_gap)、最悪点は制約(fit_gap_max)として使う(FrameScore参照)。
+    """視覚的一体感。コネクタの表面沿い区間(非接触区間)の"円柱表面"から
+    鼻本体表面までの距離の(平均, 最悪点)を返す。値が小さいほど顔に馴染んで
+    見える。平均は目的(fit_gap)、最悪点は制約(fit_gap_max)として使う
+    (FrameScore参照)。アーム(全区間がgrip_depthで意図的に鼻表面へ埋め込ま
+    れる接触区間)は対象外(surface_following_pointsのdocstring参照)。
 
     表面沿い区間の点列(surface_points)はメッシュの中心線であり、実際に
     見える/触れるのは半径arm_thickness/2だけ太い円柱の表面。中心線からの
     距離をそのまま使うと、太いアームほど実際の見た目の隙間より過大な
-    値になってしまう(frame_model.arm_points/connector_pointsが中心線を
+    値になってしまう(frame_model.connector_pointsが中心線を
     arm_thickness/2の分だけ余分に浮かせているのと対になる補正)。
     curvature等により半径分を引いた値がわずかに負になりうるため0で
     クランプする。
@@ -148,8 +174,8 @@ def _fit_gap(
     _signed_distance_to_bodyのdocstring参照)。
     """
     means, maxes = [], []
-    for points, path in sides:
-        surface_points = surface_following_points(points, path)
+    for _, path in sides:
+        surface_points = surface_following_points(path)
         _, distance, _ = trimesh.proximity.closest_point(body, surface_points)
         tube_distance = np.maximum(distance - arm_thickness / 2, 0.0)
         means.append(float(np.mean(tube_distance)))
@@ -338,8 +364,8 @@ def evaluate_frame(
         proportion_penalty=_proportion_penalty(
             sides, frame.arm_thickness, max_thickness
         ),
-        grip_depth_margin=grip_depth_margin(frame, params),
+        grip_depth_margin=grip_depth_margin(frame, params, sides),
         arm_clearance_margin=arm_clearance_margin(sides, body, frame.arm_thickness),
-        grip_ring_margin=grip_ring_margin(frame, params, body),
+        grip_ring_margin=grip_ring_margin(frame, body, sides),
         holder_size_penalty=_holder_size_penalty(frame, plug),
     )

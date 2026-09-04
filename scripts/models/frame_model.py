@@ -2,13 +2,16 @@
 
 メガネのように鼻筋(鼻の付け根)まで伸ばす必要はなく、実物の鼻クリップ
 (水泳用など)のように鼻先まわりだけで完結する小さなクリップとして表現する。
-鼻中隔の上あたりを起点に、鼻の前面より外側を保ちながら鼻栓の露出端まで
-伸びるプレースホルダー(円柱の連結)にしている(arm_points, connector_points参照)。
+鼻中隔の上あたりを起点に、鼻翼・鼻尖の少し上に沿ってarm_length伸びる
+アーム(arm_points)と、そこから鼻栓の露出端まで伸びるコネクタ
+(connector_points)の2区間で構成する(いずれも円柱の連結)。
 
-起点(鼻中隔上の1点)だけは例外で、grip_depth分だけ意図的に鼻表面へ
-めり込ませている。実際の鼻クリップが鼻中隔を軽く挟み込んで保持力を得る
-挙動の、変形計算なしの幾何的な近似(PROJECT.md「鼻の弾力(変形)は扱わない」
-補足を参照)。起点以外は従来通り非接触を保つ。
+アーム(arm_points)はgrip_depth分だけ意図的に鼻表面へめり込ませ、メガネの
+アームが鼻に沿って保持力を得るのと同じ発想で接触区間を形成する。実際の
+鼻クリップが鼻を挟み込んで保持力を得る挙動の、変形計算なしの幾何的な近似
+(PROJECT.md「鼻の弾力(変形)は扱わない」補足を参照)。コネクタ
+(connector_points)は鼻栓の露出端へ向かう到達経路であり、鼻の前面より
+外側を保ちながら非接触を保つ。
 
 経路の点列(arm_points, connector_points)は、メッシュ生成(build_frame_pair)
 だけでなくscripts/evaluation.pyの評価関数からも参照される。評価側は円柱
@@ -42,8 +45,8 @@ from .nose_model import (
     back_surface_z_at_center,
     build_nose_body,
     front_surface_z_at_center,
-    surface_profile,
-    tip_cap_depth_front,
+    front_surface_z_at_offset,
+    surface_profile_at,
     tip_cap_min_y,
 )
 from .plug_model import PlugParams, plug_outer_end
@@ -69,11 +72,13 @@ _ARM_SAMPLES = 5
 # 保持部への接続経路(connector_points)を近似する折れ線の分割数。多いほど
 # 各yでの実測値(_depth_front_at)に沿った経路になり、表面に近づく
 _CONNECTOR_SAMPLES = 24
-# アーム・保持部の「円柱の表面」を鼻の表面からどれだけ浮かせるか(mm)。
-# 0だと表面にちょうど接してしまい、断面の丸め計算の誤差でわずかにめり込む
-# 可能性があるため。中心線(arm_points/connector_pointsが計算する点列)は
-# これに加えてarm_thickness/2(円柱の半径)も上乗せした位置に置く必要がある
-# (中心線だけを浮かせても、円柱の実体は半径の分だけ表面に近づくため)
+# コネクタ(connector_points、鼻栓へ向かう非接触区間)の「円柱の表面」を
+# 鼻の表面からどれだけ浮かせるか(mm)。0だと表面にちょうど接してしまい、
+# 断面の丸め計算の誤差でわずかにめり込む可能性があるため。中心線
+# (connector_pointsが計算する点列)はこれに加えてarm_thickness/2(円柱の
+# 半径)も上乗せした位置に置く必要がある(中心線だけを浮かせても、円柱の
+# 実体は半径の分だけ表面に近づくため)。アーム(arm_points)は現在は全区間が
+# grip_depthで意図的に鼻表面へ埋め込まれる接触区間のため対象外
 _SURFACE_CLEARANCE = 0.8
 # arm_lengthの下限(mm)。3Dプリントでの最小造形サイズの目安であると同時に、
 # evaluation.pyの現行の評価関数がarm_lengthを直接評価しておらず(smoothness
@@ -132,13 +137,11 @@ class FrameParams:
 
 
 def _depth_front_at(params: NoseParams, y: float) -> float:
-    """yにおける前面迫り出しを返す。y>=0はsurface_profile(通常のテーパー)、
-    y<0は鼻先の丸め区間の実測値(tip_cap_depth_front)を使い分ける
-    (surface_profileの延長では丸め処理による窄まりが反映されないため)。
+    """yにおける前面迫り出しを返す。y<0(鼻先の丸め区間)ではsurface_profileの
+    単純延長ではなく丸め処理による窄まりを反映した値を使う
+    (nose_model.surface_profile_at参照)。
     """
-    if y >= 0:
-        return surface_profile(params, y)[2]
-    return tip_cap_depth_front(params, y)
+    return surface_profile_at(params, y)[2]
 
 
 def arm_points(
@@ -148,41 +151,30 @@ def arm_points(
     arm_length伸びる、アームの経路(点列)を返す(points[0]が起点、
     points[-1]がアーム下端)。
 
-    起点(points[0])だけは例外で、grip_depthの分だけ前面境界(実際に
-    フィレットで丸めた後のメッシュ表面、front_surface_z_at_center)より
-    内側(z方向)にめり込ませ、実際の鼻クリップが鼻中隔を挟み込んで保持力を
-    得る挙動を近似する(モジュールdocstring参照)。起点の基準にsurface_
-    profileのdepth_front(丸め処理前の三角形の頂点)を使うと、実際のメッシュ
-    表面はそこから既定値で約1.66mmも後退しているため、grip_depthを設定
-    しても実際にはメッシュ表面にすら届かず、意図した挙動が機能しなくなる
-    (front_surface_z_at_centerのdocstring参照)。
-    起点以外の経路は、その時点のdepth_front(丸め処理前、実際の表面より
-    常に前方=外側にある)より確実に外側を保つことで鼻の内部を貫通しない
-    ようにしている(depth_front(y)はそのyの断面が取りうる最大のzなので、
-    zがそれを上回っている限りxがどの値でも外側にいることが保証される。
-    フィレットにより実際の表面はさらに後退しているため、この安全マージン
-    はむしろ余分に確保される)。
-    ただしこの点列は円柱メッシュの中心線になるため、_SURFACE_CLEARANCEに
-    加えてarm_thickness/2(円柱の半径)も上乗せする必要がある。半径を
-    考慮しないと、中心線は表面から離れていても円柱の実体は表面へ
-    めり込みうる(arm_thicknessが_SURFACE_CLEARANCEの2倍を超えると発生する。
-    デフォルト値(arm_thickness=2.0、_SURFACE_CLEARANCE=0.8)は半径1.0mmの
-    ほうが上回っており、この上乗せがないと標準設定ですら約0.2mmめり込む)。
+    メガネのアームが鼻翼・鼻尖の少し上に沿って保持力を得るのと同じ発想で、
+    アーム全区間をgrip_depthの分だけ前面境界より内側(z方向)にめり込ませる
+    (実際の鼻クリップが鼻中隔〜鼻翼まわりを挟み込んで保持力を得る挙動の
+    近似。モジュールdocstring参照)。以前は起点(points[0])だけがこの挙動で、
+    それ以外は表面から離す設計だったが、clip_angleでxが0から開くほど
+    実際の表面(丸め三角形断面の背面角へ向けて後退する)から乖離していく
+    ため、アームが鼻表面から浮いて見える原因になっていた。基準面には
+    x=0でfront_surface_z_at_center(フィレット済みリングの実測値、最も
+    精度が高い)、x≠0ではfront_surface_z_at_offset(前面エッジの直線近似。
+    実測手段がないため。いずれもdocstring参照)を使い分ける。
     xは起点(鼻中隔中央、x=0)からclip_angleに応じて左右に開いていく
     (小さいほど鼻中隔寄りにきつく締まり、大きいほど鼻翼側まで開く)。
     """
     ys = np.linspace(_ARM_ANCHOR_Y, _ARM_ANCHOR_Y - frame.arm_length, _ARM_SAMPLES)
-    standoff = _SURFACE_CLEARANCE + frame.arm_thickness / 2
 
     points = []
     for i, y in enumerate(ys):
-        if i == 0:
-            front_z = front_surface_z_at_center(params, y)
-            z = front_z - frame.grip_depth
-        else:
-            _, _, depth_front = surface_profile(params, y)
-            z = depth_front + standoff
         x = side * np.tan(np.radians(frame.clip_angle)) * (_ARM_ANCHOR_Y - y)
+        front_z = (
+            front_surface_z_at_center(params, y)
+            if i == 0
+            else front_surface_z_at_offset(params, y, x)
+        )
+        z = front_z - frame.grip_depth
         points.append(np.array([x, y, z]))
     return points
 
@@ -242,19 +234,17 @@ def build_side_paths(
     return points, path
 
 
-def surface_following_points(
-    points: list[np.ndarray], path: list[np.ndarray]
-) -> np.ndarray:
-    """アーム・コネクタのうち、鼻表面に沿わせている区間だけの点列を返す。
+def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
+    """コネクタのうち、鼻表面に沿わせている(接触しない)区間だけの点列を返す。
 
-    アーム起点(points[0])はgrip_depthで意図的にめり込ませている点なので
-    除外し(evaluation.pyのretention/painで別途評価する)、コネクタ最終点
-    (path[-1])は鼻栓へ意図的に離れていくダイブ区間の到達点なので除外する。
-    path[0]はarm_end(=points[-1])と同じ点のため、重複しないようpath[1:]から
-    使う。evaluation.pyのfit_gap、およびvalidate_arm_clearanceの両方から
-    参照される。
+    アーム(arm_points)は全区間がgrip_depthで意図的に鼻表面へ埋め込まれる
+    接触区間(evaluation.pyのretention/grip_depth_margin/grip_ring_margin
+    で別途評価する)なので対象外。コネクタ最終点(path[-1])は鼻栓へ
+    意図的に離れていくダイブ区間の到達点なので除外する。path[0]はarm_end
+    (=arm_pointsの最終点)と同じ点のため、重複しないようpath[1:-1]を使う。
+    evaluation.pyのfit_gap、およびarm_clearance_marginの両方から参照される。
     """
-    return np.array(points[1:] + path[1:-1])
+    return np.array(path[1:-1])
 
 
 def _polyline_mesh(points: list[np.ndarray], radius: float) -> trimesh.Trimesh:
@@ -316,35 +306,54 @@ def validate_target_reach(plug: PlugParams, params: NoseParams) -> None:
             )
 
 
-def grip_depth_margin(frame: FrameParams, params: NoseParams) -> float:
-    """grip_depth+半径(arm_thickness/2)が、アーム起点(y=_ARM_ANCHOR_Y)に
-    おける鼻の局所的な厚み(前面〜背面の実際のz、x=0地点)をどれだけ
-    超えているかを返す(正=違反量、0以下=安全)。前面〜背面方向=z方向の
-    1次元チェックで、側方への突き抜けはgrip_ring_margin側で別途扱う。
+def grip_depth_margin(
+    frame: FrameParams, params: NoseParams, sides: list[SidePaths]
+) -> float:
+    """grip_depth+半径(arm_thickness/2)が、アーム上の各点における鼻の
+    局所的な厚み(前面〜背面の実際のz)をどれだけ超えているかを返す
+    (正=違反量、0以下=安全。左右のアーム全区間のうち最も厳しい点の値)。
+    前面〜背面方向=z方向の1次元チェックで、側方への突き抜けは
+    grip_ring_margin側で別途扱う。sidesはbuild_side_pathsで左右分を
+    事前計算した(points, path)のリスト(呼び出し側で1度だけ計算し、
+    他の検証と使い回すことで重複計算を避けるため)。
 
-    超えると起点の円柱が鼻の背面(反対側)を突き抜ける非物理的な状態になる。
+    超えるとその点の円柱が鼻の背面(反対側)を突き抜ける非物理的な状態になる。
     frameに依存する(=FrameParamsの探索によって結果が変わる)ため、
     evaluate_frameは例外で止めずこの値を制約として使う。build_frame_pair
     (メッシュ生成)は例外で止めたいのでvalidate_grip_depthを使う。
-    前面境界にはfront_surface_z_at_center、背面境界にはback_surface_z_
-    at_centerを使う(丸め処理前のdepth_frontや単純な-depth_backをそのまま
-    使うと、フィレット・ブーメラン形状による後退を無視してしまい、実際より
-    安全域を大きく見積もる)。
 
-    起点は円柱の中心線であり、実際にめり込むのは中心線(grip_depth)だけ
+    各点の前面境界(=embed前のfront_z)は、point.z(=front_z - grip_depth、
+    arm_points参照)から`+ grip_depth`で復元できる(x=0か否かでarm_pointsが
+    front_surface_z_at_center/front_surface_z_at_offsetを使い分けている
+    のと同じ計算をここで再現する必要がなく、実際に使われた値と確実に
+    一致する)。背面境界にはback_surface_z_at_centerを使う(単純な
+    -depth_backをそのまま使うと、ブーメラン形状による後退を無視してしまい
+    実際より安全域を大きく見積もる)。背面のブーメラン膨らみはx=0付近で
+    最大になり、xが離れるほど小さくなる(_boomerang_bowが両端で元の直線
+    に戻る)ため、中心以外の点でもback_surface_z_at_center(x=0での値)を
+    使うと実際の背面より手前(浅い)に見積もることになり、安全側(=違反を
+    見逃さない方向)の近似になる。
+
+    アームは円柱の中心線であり、実際にめり込むのは中心線(grip_depth)だけ
     でなく半径(arm_thickness/2)の分だけさらに深い位置までである
     (arm_clearance_marginの調査で判明。半径を考慮しないと、太い
     arm_thicknessと組み合わせたgrip_depthで実際には鼻を突き抜けている
     状態を見逃す)。
     """
-    front_z = front_surface_z_at_center(params, _ARM_ANCHOR_Y)
-    back_z = back_surface_z_at_center(params, _ARM_ANCHOR_Y)
-    max_depth = front_z - back_z
     total_depth = frame.grip_depth + frame.arm_thickness / 2
-    return total_depth - max_depth
+    worst = -np.inf
+    for points, _ in sides:
+        for x, y, z in points:
+            front_z = z + frame.grip_depth
+            back_z = back_surface_z_at_center(params, y)
+            max_depth = front_z - back_z
+            worst = max(worst, total_depth - max_depth)
+    return worst
 
 
-def validate_grip_depth(frame: FrameParams, params: NoseParams) -> None:
+def validate_grip_depth(
+    frame: FrameParams, params: NoseParams, sides: list[SidePaths]
+) -> None:
     """grip_depth_marginが正(=違反)の場合に例外を送出する。
 
     build_frame_pair(メッシュ生成)から使う想定。evaluate_frame(評価)は
@@ -352,11 +361,11 @@ def validate_grip_depth(frame: FrameParams, params: NoseParams) -> None:
     grip_depth_marginを直接使う(モジュールdocstring・grip_depth_margin
     のdocstring参照)。
     """
-    margin = grip_depth_margin(frame, params)
+    margin = grip_depth_margin(frame, params, sides)
     if margin >= 0:
         raise ValueError(
             f"grip_depth({frame.grip_depth})+半径({frame.arm_thickness / 2})が"
-            f"起点(y={_ARM_ANCHOR_Y})での鼻の厚みを超えており(超過量: "
+            f"アーム上のどこかで鼻の厚みを超えており(超過量: "
             f"{margin:.3f}mm)、鼻を突き抜けてしまう"
         )
 
@@ -382,21 +391,21 @@ def validate_anchor_height(params: NoseParams) -> None:
 def arm_clearance_margin(
     sides: list[SidePaths], body: trimesh.Trimesh, arm_thickness: float
 ) -> float:
-    """アーム・コネクタの表面沿い区間(実際の円柱メッシュ)が、鼻本体メッシュに
-    どれだけめり込んでいるかを返す(正=めり込み量、0以下=安全)。sidesは
-    build_side_pathsで左右分を事前計算した(points, path)のリスト
+    """コネクタの表面沿い区間(非接触区間、実際の円柱メッシュ)が、鼻本体
+    メッシュにどれだけめり込んでいるかを返す(正=めり込み量、0以下=安全)。
+    sidesはbuild_side_pathsで左右分を事前計算した(points, path)のリスト
     (呼び出し側で1度だけ計算し、メッシュ生成・他の検証と使い回すことで
     重複計算を避けるため)。frameに依存する(arm_thicknessの探索によって
     結果が変わる)ため、evaluate_frameは例外で止めずこの値を制約として
     使う。build_frame_pair(メッシュ生成)は例外で止めたいのでvalidate_
     arm_clearanceを使う。
 
-    arm_points/connector_pointsのstandoff(_SURFACE_CLEARANCE+半径)は、
-    その時点のyでの前面最大値(depth_front)からのz軸方向のオフセットに
-    過ぎない。これは「centerlineが貫通しない」ことは保証するが(depth_front
-    はそのyでの最大zなので、zがそれを上回れば貫通しない)、鼻表面がyに
-    対して傾いている箇所(鼻先の丸め区間など)では、centerlineから表面
-    までの実際のユークリッド距離がstandoffより小さくなりうる。この誤差は
+    connector_pointsのstandoff(_SURFACE_CLEARANCE+半径)は、その時点の
+    yでの前面最大値(depth_front)からのz軸方向のオフセットに過ぎない。
+    これは「centerlineが貫通しない」ことは保証するが(depth_frontはその
+    yでの最大zなので、zがそれを上回れば貫通しない)、鼻表面がyに対して
+    傾いている箇所(鼻先の丸め区間など)では、centerlineから表面までの
+    実際のユークリッド距離がstandoffより小さくなりうる。この誤差は
     半径が大きいほど拡大するため、arm_thicknessが太い場合は名目上の
     standoffを確保していても円柱が実際には表面へめり込むことがある。
 
@@ -407,8 +416,8 @@ def arm_clearance_margin(
     対して符号付き距離(_signed_distance_to_body)を使うよう修正した
     (この関数がチェックする表面沿い区間そのものは、実測ではarm_thickness=
     6mm程度まで十分な余裕(2mm以上)があり、めり込みは発生しなかった。
-    実際にめり込みが起きていたのはこの関数の対象外である起点(意図的な
-    grip_depthのめり込み)側で、半径を考慮していなかったgrip_depth_margin
+    実際にめり込みが起きていたのはこの関数の対象外であるアーム(意図的な
+    grip_depthのめり込み区間)側で、半径を考慮していなかったgrip_depth_margin
     の不備だった。そちらを別途修正済み)。
 
     その後、evaluate_frameを繰り返し呼び出すベンチマークで、この関数が
@@ -425,8 +434,8 @@ def arm_clearance_margin(
     """
     radius = arm_thickness / 2
     worst = -np.inf
-    for points, path in sides:
-        surface_points = surface_following_points(points, path)
+    for _, path in sides:
+        surface_points = surface_following_points(path)
         tube = _polyline_mesh(list(surface_points), radius)
         signed_distance = _signed_distance_to_body(body, tube.vertices)
         min_signed = float(signed_distance.min())
@@ -453,21 +462,25 @@ def validate_arm_clearance(
 
 
 def grip_ring_margin(
-    frame: FrameParams, params: NoseParams, body: trimesh.Trimesh
+    frame: FrameParams, body: trimesh.Trimesh, sides: list[SidePaths]
 ) -> float:
-    """アーム起点の円形断面(半径arm_thickness/2、中心はarm_pointsの起点と
-    同じ計算式)が、想定をどれだけ超えて鼻本体メッシュから突き出しているかを
-    返す(正=違反量、0以下=安全)。frameに依存する(grip_depth・
-    arm_thicknessの探索によって結果が変わる)ため、evaluate_frameは例外で
-    止めずこの値を制約として使う。build_frame_pair(メッシュ生成)は例外で
-    止めたいのでvalidate_grip_ringを使う。
+    """アーム上の各点の円形断面(半径arm_thickness/2、中心は各点そのもの)が、
+    想定をどれだけ超えて鼻本体メッシュから突き出しているかを返す
+    (正=違反量、0以下=安全。左右のアーム全区間のうち最も厳しい点の値)。
+    frameに依存する(grip_depth・arm_thicknessの探索によって結果が変わる)
+    ため、evaluate_frameは例外で止めずこの値を制約として使う。
+    build_frame_pair(メッシュ生成)は例外で止めたいのでvalidate_grip_ringを
+    使う。sidesはbuild_side_pathsで左右分を事前計算した(points, path)の
+    リスト(呼び出し側で1度だけ計算し、他の検証と使い回すことで重複計算を
+    避けるため)。
 
     半径がgrip_depthより大きい場合、断面の押し込み方向の先端が元の表面
     位置より外側に出るのは物理的に正常(指で肉を軽く押し込む形と同じで、
     半径の分だけ完全に埋没している必要はない)。平坦面を仮定すると、この
     先端での突き出し量の理論値は`max(0, radius - grip_depth)`になる
     (押し込み方向となす角θでの理論的な突き出し量は`radius*cos(θ) - grip_depth`
-    で、θ=0(先端)が最大)。
+    で、θ=0(先端)が最大)。この理論値はgrip_depthのみに依存し位置に
+    依存しないため、アーム上のどの点でも同じallowedを使う。
 
     実際の鼻表面は平坦ではなくフィレットで丸められている。grip_depthが
     半径に対して十分深い組み合わせでは、前面コーナーが凸面のため実際の
@@ -487,26 +500,32 @@ def grip_ring_margin(
     する方式だったが、実際には赤道が最も安全側に振れる方向で、そこから
     20度ずれただけで別の方向での突き抜けを見逃していたため、全周を
     理論値ベースで検証する方式に置き換えた)
+
+    x=0(起点)以外の点では、押し込み方向を常にz軸とみなす近似を使う
+    (front_surface_z_at_offsetと同様、中心から離れるほど実際の局所法線
+    方向とのズレが増えるが、_GRIP_RING_TOLERANCEと同じ精神で許容する)。
     """
-    front_z = front_surface_z_at_center(params, _ARM_ANCHOR_Y)
-    center_z = front_z - frame.grip_depth
     radius = frame.arm_thickness / 2
     theta = np.linspace(-np.pi, np.pi, _GRIP_RING_SAMPLES, endpoint=False)
-    ring = np.stack(
-        [
-            radius * np.sin(theta),
-            np.full(_GRIP_RING_SAMPLES, _ARM_ANCHOR_Y),
-            center_z + radius * np.cos(theta),
-        ],
-        axis=1,
-    )
-    signed_distance = _signed_distance_to_body(body, ring)
     allowed = max(0.0, radius - frame.grip_depth) + _GRIP_RING_TOLERANCE
-    return float(signed_distance.max()) - allowed
+    worst = -np.inf
+    for points, _ in sides:
+        for x, y, z in points:
+            ring = np.stack(
+                [
+                    x + radius * np.sin(theta),
+                    np.full(_GRIP_RING_SAMPLES, y),
+                    z + radius * np.cos(theta),
+                ],
+                axis=1,
+            )
+            signed_distance = _signed_distance_to_body(body, ring)
+            worst = max(worst, float(signed_distance.max()) - allowed)
+    return worst
 
 
 def validate_grip_ring(
-    frame: FrameParams, params: NoseParams, body: trimesh.Trimesh
+    frame: FrameParams, body: trimesh.Trimesh, sides: list[SidePaths]
 ) -> None:
     """grip_ring_marginが正(=違反)の場合に例外を送出する。
 
@@ -514,12 +533,12 @@ def validate_grip_ring(
     frameに依存するこの検証を例外ではなく制約として扱うため、
     grip_ring_marginを直接使う(モジュールdocstring参照)。
     """
-    margin = grip_ring_margin(frame, params, body)
+    margin = grip_ring_margin(frame, body, sides)
     if margin > 0:
         raise ValueError(
             f"grip_depth({frame.grip_depth})とarm_thickness"
-            f"({frame.arm_thickness})の組み合わせで、起点の断面が想定を"
-            f"{margin:.3f}mm超えて鼻表面から突き出している。grip_depthを"
+            f"({frame.arm_thickness})の組み合わせで、アーム上のどこかの断面が"
+            f"想定を{margin:.3f}mm超えて鼻表面から突き出している。grip_depthを"
             "大きくするかarm_thicknessを小さくすること"
         )
 
@@ -539,12 +558,12 @@ def build_frame_pair(
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
     """左右のフレーム(アーム+保持部)を構築する(着色済み)。"""
     validate_target_reach(plug, params)
-    validate_grip_depth(frame, params)
     validate_anchor_height(params)
     body = build_nose_body(params)
     sides = [build_side_paths(frame, plug, params, side) for side in (-1, 1)]
+    validate_grip_depth(frame, params, sides)
     validate_arm_clearance(sides, body, frame.arm_thickness)
-    validate_grip_ring(frame, params, body)
+    validate_grip_ring(frame, body, sides)
 
     radius = frame.arm_thickness / 2
 

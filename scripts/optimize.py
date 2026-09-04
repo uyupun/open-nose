@@ -24,9 +24,12 @@ FrameParams.__post_init__が要求する下限(arm_length>=1.0、clip_angle>0等
 - clip_angle: 下限は0を避けるため1.0(浮動小数点境界)。上限は
   _MAX_CLIP_ANGLE(60.0)をそのまま使う
 - arm_length: 下限は_MIN_ARM_LENGTH(1.0)。上限は明確な基準がないため、
-  _ARM_ANCHOR_Y(6.0)や鼻先までの距離感を踏まえた15.0mmとした
-  (PROJECT.mdの既知の限界の通り、評価関数が長さを積極的に評価しないため
-  下限に張り付く傾向がある。それ自体はこのスクリプトで解決する範囲外)
+  _ARM_ANCHOR_Y(6.0)や鼻先までの距離感を踏まえた15.0mmとした。retentionが
+  arm_lengthに比例するようになった(evaluation.pyのモジュールdocstring
+  「retentionにarm_lengthを掛ける理由」参照)ため、下限に張り付く傾向は
+  解消された。実際に既定設定(pop_size=50, n_gen=60)で動かすと、上限
+  (15.0mm)まで達する前に、鼻先の丸め区間(y<0)に入って幾何的な制約
+  (grip_ring_margin等)に引っかかる約9〜10mm付近で釣り合う結果になった
 - arm_thickness: 下限0.5mm(針のように細すぎない程度)。上限8.0mmは
   retention/proportion_penalty/holder_size_penaltyが頭打ちにする値より
   余裕を持って大きくし、制約の境界が探索範囲の内側に来るようにした
