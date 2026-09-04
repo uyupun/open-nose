@@ -523,7 +523,12 @@ def _build_nose_body_cached(params: NoseParams) -> trimesh.Trimesh:
             "鼻孔が側面や背面まで突き抜けている可能性がある"
             "(euler_number != 2)。tip_wやnostril_a/b/gapを見直すこと"
         )
-    body.visual.face_colors = [255, 220, 200, 255]
+    # 不透明(alpha=255)だと、鼻表面より奥にあるフレームのめり込み部分が
+    # Zバッファで隠れて見えなくなる(フレーム側を半透明にしても、不透明な
+    # 鼻本体が手前にあれば深度テストで弾かれてしまうため)。鼻本体も半透明に
+    # することで、めり込み部分が透けて見えるようにする(models.frame_model.
+    # _FRAME_COLORのdocstring参照)
+    body.visual.face_colors = [255, 220, 200, 210]
     return body
 
 

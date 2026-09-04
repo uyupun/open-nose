@@ -59,8 +59,10 @@ from .nose_model import (
 from .plug_model import PlugParams, plug_outer_end
 
 # フレームのプレースホルダーの色(グレー、半透明)。鼻表面との位置関係
-# (めり込み・浮き)が透けて見えるよう、鼻本体(不透明)・鼻栓(alpha=200)より
-# 低いalphaにしている。OBJはalphaを保持できないため、この効果を確認するには
+# (めり込み・浮き)が透けて見えるよう、鼻本体(alpha=210)・鼻栓(alpha=200)
+# より低いalphaにしている。鼻本体も半透明にしているのは、不透明だとフレームの
+# めり込み部分が深度テストで隠れて見えなくなるため(models.nose_model.
+# build_nose_body参照)。OBJはalphaを保持できないため、この効果を確認するには
 # glTF(.glb)で書き出す(export_model.py/export_frame.py参照)
 _FRAME_COLOR = [90, 90, 100, 140]
 # アームの起点(クリップ位置)のy座標(鼻先=0からの距離、mm)。鼻中隔の
