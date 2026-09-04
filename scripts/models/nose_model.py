@@ -560,14 +560,13 @@ def tip_cap_half_width(params: NoseParams, y: float) -> float:
 def surface_profile_at(params: NoseParams, y: float) -> tuple[float, float, float]:
     """指定したyにおける鼻表面の断面プロファイル(半幅, 背面奥行き, 前面迫り出し)
     を返す。surface_profileの拡張版で、鼻先の丸め区間(y<0)ではtip_cap_*を
-    使う(surface_profileの延長では丸め処理による窄まりが反映されないため。
-    frame_model._depth_front_atが前面迫り出しだけに対して行っている切り替え
-    を、半幅・背面奥行きも含めた3値に広げたもの)。前面迫り出しはtip_cap_
-    depth_front、半幅はtip_cap_half_width、背面奥行きは_BACK_DEPTH(この
-    区間は鼻根から十分離れており_root_waist_depth_bumpの影響を受けない
-    ため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
-    models.frame_model.front_surface_z_at_offsetが鼻先近くまでアームを
-    伸ばす(arm_length>_ARM_ANCHOR_Y)場合に、正しい表面位置を得るために使う。
+    使う(surface_profileの延長では丸め処理による窄まりが反映されないため)。
+    前面迫り出しはtip_cap_depth_front、半幅はtip_cap_half_width、背面奥行きは
+    _BACK_DEPTH(この区間は鼻根から十分離れており_root_waist_depth_bumpの
+    影響を受けないため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
+    models.frame_model.front_surface_z_at_center/front_surface_z_at_offsetが、
+    鼻先近くまでアームを伸ばす(arm_length>_ARM_ANCHOR_Y)場合や、コネクタが
+    鼻先を越えて鼻栓へ向かう場合に、正しい表面位置を得るために使う。
     """
     if y >= 0:
         return surface_profile(params, y)

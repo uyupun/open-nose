@@ -54,7 +54,6 @@ from .nose_model import (
     build_nose_body,
     front_surface_z_at_center,
     front_surface_z_at_offset,
-    surface_profile_at,
     tip_cap_min_y,
 )
 from .plug_model import PlugParams, plug_outer_end
@@ -76,16 +75,33 @@ _MID_NOSE_RATIO = 0.5
 # 表面のカーブに追従させる(arm_points参照)
 _ARM_SAMPLES = 5
 # 保持部への接続経路(connector_points)を近似する折れ線の分割数。多いほど
-# 各yでの実測値(_depth_front_at)に沿った経路になり、表面に近づく
+# 各yでの実測値(front_surface_z_at_offset)に沿った経路になり、表面に近づく
 _CONNECTOR_SAMPLES = 24
-# コネクタ(connector_points、鼻栓へ向かう非接触区間)の「円柱の表面」を
-# 鼻の表面からどれだけ浮かせるか(mm)。0だと表面にちょうど接してしまい、
-# 断面の丸め計算の誤差でわずかにめり込む可能性があるため。中心線
-# (connector_pointsが計算する点列)はこれに加えてarm_thickness/2(円柱の
-# 半径)も上乗せした位置に置く必要がある(中心線だけを浮かせても、円柱の
-# 実体は半径の分だけ表面に近づくため)。アーム(arm_points)は現在は全区間が
-# grip_depthで意図的に鼻表面へ埋め込まれる接触区間のため対象外
-_SURFACE_CLEARANCE = 0.8
+# コネクタ(connector_points、鼻栓へ向かう非接触区間)の「チューブの表面」を
+# 鼻の表面からどれだけ浮かせるか(mm)。中心線(connector_pointsが計算する
+# 点列)はこれに加えてarm_thickness/2(チューブの半径)も上乗せした位置に
+# 置く必要がある(中心線だけを浮かせても、チューブの実体は半径の分だけ
+# 表面に近づくため)。アーム(arm_points)は現在は全区間がgrip_depthで
+# 意図的に鼻表面へ埋め込まれる接触区間のため対象外。
+# 以前は0.8だったが、connector_pointsの表面参照をx非考慮(_depth_front_at、
+# 中心x=0の値を常に使う)からx考慮(front_surface_z_at_offset)に修正した際、
+# 鼻先の丸め区間での表面の傾きによる実際の余裕不足(arm_clearance_marginの
+# docstring参照)が表面化した。x非考慮の実装は「常に必要以上に浮く」誤差を
+# 持っており、それが余裕不足を偶然覆い隠していたため。既定値でarm_clearance_
+# marginに安全マージン(実測約-0.28mm)を持たせるよう4.0に引き上げた
+_SURFACE_CLEARANCE = 4.0
+# アーム→コネクタの継ぎ目で、埋め込み(-grip_depth)から浮かせ(+standoff)へ
+# 何サンプルかけて線形に遷移させるか(connector_points参照)。瞬時に
+# 切り替えると、yの刻み幅がアーム(1.5mm間隔)とコネクタ(0.2mm間隔)で
+# 大きく異なるため、短いy区間にオフセットの変化が集中し、経路が不自然に
+# 折れ曲がって見える原因になっていた(issue #2、実測で94〜108度)。既定値・
+# 実際のパレート候補で角度とめり込み量を計測しながら決めた経験的な値。
+# arm_lengthが長く鼻先の丸め区間に深く入り込む極端なケースでは、
+# front_surface_z_at_offsetの直線近似精度が落ちる既知の限界の影響を受け、
+# この遷移だけでは十分に滑らかにならない場合が残る(PROJECT.md参照。
+# smoothness/arm_clearance_margin制約がそうした個体をGAの探索から除外する
+# 想定)
+_STANDOFF_TRANSITION_SAMPLES = 18
 # arm_lengthの下限(mm)。3Dプリントでの最小造形サイズの目安であると同時に、
 # evaluation.pyの現行の評価関数がarm_lengthを直接評価しておらず(smoothness
 # はむしろarm_lengthが短いほど改善する)、放置すると0近くへ退化しうるための
@@ -147,14 +163,6 @@ class FrameParams:
             raise ValueError(f"grip_depth は0以上にすること: {self.grip_depth}")
 
 
-def _depth_front_at(params: NoseParams, y: float) -> float:
-    """yにおける前面迫り出しを返す。y<0(鼻先の丸め区間)ではsurface_profileの
-    単純延長ではなく丸め処理による窄まりを反映した値を使う
-    (nose_model.surface_profile_at参照)。
-    """
-    return surface_profile_at(params, y)[2]
-
-
 def arm_points(
     frame: FrameParams, params: NoseParams, side: Literal[-1, 1]
 ) -> list[np.ndarray]:
@@ -199,9 +207,22 @@ def connector_points(
     arm_endからtargetへ直線で向かうと鼻の内部を貫通しうるため、まず
     arm_pointsと同じ考え方(その時点のyでの前面迫り出しより外側を保つ)で
     targetのx, yまで折れ線で近づく(_CONNECTOR_SAMPLES点、xはarm_endから
-    targetまで線形補間)。鼻先の丸め区間(tip_cap_depth_front)はyが進むに
-    つれ必要な高さが下がっていく形状なので、区間ごとに実測値を計算する
-    ことで表面に近い経路になる。
+    targetまで線形補間)。鼻先の丸め区間はyが進むにつれ必要な高さが
+    下がっていく形状なので、区間ごとに実測値(front_surface_z_at_offset。
+    xが変わるためarm_pointsのi>0の点と同じくx考慮の値を使う。以前は
+    x非考慮(常に中心x=0の値を使う)だったため、外側の点ほど実際の表面
+    より必要以上に浮いてしまっていた)を計算することで表面に近い経路になる。
+
+    表面からの浮かせ方(オフセット)は、arm_end直後で瞬時にstandoffへ
+    切り替えず、_STANDOFF_TRANSITION_SAMPLESにわたって-grip_depth(arm_end
+    の埋め込み)からstandoffへ線形に遷移させる。瞬時に切り替えると、yの
+    刻み幅がアーム(1.5mm間隔)とコネクタ(0.2mm間隔)で大きく異なるため、
+    短いy区間にオフセットの変化が集中し、経路が不自然に折れ曲がって
+    見える原因になっていた(issue #2。_SURFACE_CLEARANCEのdocstring参照)。
+    遷移区間の点は意図的にまだ(部分的に)埋め込まれた状態のため、
+    surface_following_points(fit_gap/arm_clearance_marginが非接触区間の
+    判定に使う)はこの区間も除外する。
+
     最後にtargetへ向けてzを差し込む(approach→path[-1])。targetのyは
     鼻本体メッシュの範囲より外側(validate_target_reachが検証する)なので、
     この区間は鼻の実体が存在しない位置を通ることになり安全。
@@ -215,9 +236,11 @@ def connector_points(
 
     path = [arm_end]
     for i in range(1, _CONNECTOR_SAMPLES):
-        y = ys[i]
-        z = _depth_front_at(params, y) + standoff
-        path.append(np.array([xs[i], y, z]))
+        y, x = ys[i], xs[i]
+        surface_z = front_surface_z_at_offset(params, y, x)
+        t = min(i / _STANDOFF_TRANSITION_SAMPLES, 1.0)
+        offset = (1 - t) * -frame.grip_depth + t * standoff
+        path.append(np.array([x, y, surface_z + offset]))
     approach = path[-1]
 
     dive = target - approach
@@ -260,12 +283,15 @@ def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
 
     アーム(arm_points)は全区間がgrip_depthで意図的に鼻表面へ埋め込まれる
     接触区間(evaluation.pyのretention/grip_depth_margin/grip_ring_margin
-    で別途評価する)なので対象外。コネクタ最終点(path[-1])は鼻栓へ
-    意図的に離れていくダイブ区間の到達点なので除外する。path[0]はarm_end
-    (=arm_pointsの最終点)と同じ点のため、重複しないようpath[1:-1]を使う。
+    で別途評価する)なので対象外。コネクタの先頭_STANDOFF_TRANSITION_
+    SAMPLES点も、埋め込み(-grip_depth)から浮かせ(standoff)への遷移区間
+    (connector_points参照)で意図的にまだ(部分的に)埋め込まれた状態のため
+    同様に対象外。コネクタ最終点(path[-1])は鼻栓へ意図的に離れていく
+    ダイブ区間の到達点なので除外する。path[0]はarm_end(=arm_pointsの
+    最終点)と同じ点のため、重複しないようpath[1:-1]から使う。
     evaluation.pyのfit_gap、およびarm_clearance_marginの両方から参照される。
     """
-    return np.array(path[1:-1])
+    return np.array(path[1 + _STANDOFF_TRANSITION_SAMPLES : -1])
 
 
 def _tube_mesh(points: list[np.ndarray], radius: float) -> trimesh.Trimesh:
@@ -428,24 +454,31 @@ def arm_clearance_margin(
     arm_clearanceを使う。
 
     connector_pointsのstandoff(_SURFACE_CLEARANCE+半径)は、その時点の
-    yでの前面最大値(depth_front)からのz軸方向のオフセットに過ぎない。
-    これは「centerlineが貫通しない」ことは保証するが(depth_frontはその
-    yでの最大zなので、zがそれを上回れば貫通しない)、鼻表面がyに対して
-    傾いている箇所(鼻先の丸め区間など)では、centerlineから表面までの
-    実際のユークリッド距離がstandoffより小さくなりうる。この誤差は
-    半径が大きいほど拡大するため、arm_thicknessが太い場合は名目上の
-    standoffを確保していても円柱が実際には表面へめり込むことがある。
+    y・xでの前面表面位置(front_surface_z_at_offset)からのz軸方向の
+    オフセットに過ぎない。これは「centerlineが貫通しない」ことは保証するが、
+    鼻表面がyに対して傾いている箇所(鼻先の丸め区間など)では、centerline
+    から表面までの実際のユークリッド距離がstandoffより小さくなりうる。
+    この誤差は半径が大きいほど拡大するため、arm_thicknessが太い場合は
+    名目上のstandoffを確保していてもチューブが実際には表面へめり込む
+    ことがある。
 
     当初は中心線(surface_following_points)から表面までの符号なし距離が
     半径以上あるかで検証していたが、符号なし距離では「表面のすぐ近くに
     いる(安全)」と「わずかにめり込んでいる(危険)」を区別できないという
     欠陥があった。実際に生成されるチューブメッシュ(_tube_mesh)の頂点に
-    対して符号付き距離(_signed_distance_to_body)を使うよう修正した
-    (この関数がチェックする表面沿い区間そのものは、実測ではarm_thickness=
-    6mm程度まで十分な余裕(2mm以上)があり、めり込みは発生しなかった。
-    実際にめり込みが起きていたのはこの関数の対象外であるアーム(意図的な
-    grip_depthのめり込み区間)側で、半径を考慮していなかったgrip_depth_margin
-    の不備だった。そちらを別途修正済み)。
+    対して符号付き距離(_signed_distance_to_body)を使うよう修正した。
+
+    connector_pointsの表面参照は当初x非考慮(常に中心x=0の値を使う)
+    だったため、実際には必要以上に浮いており(既定値で実測3.9〜4.7mm)、
+    それが鼻先の丸め区間での傾きによる余裕不足を偶然覆い隠していた
+    (実測ではarm_thickness=6mm程度まで2mm以上の余裕があり、めり込みは
+    発生しなかった)。x考慮の表面参照に修正した際にこの余裕不足が表面化
+    したため、_SURFACE_CLEARANCEを4.0mmに引き上げ、あわせて_STANDOFF_
+    TRANSITION_SAMPLESも増やして対応した(既定値でこの関数に安全マージン
+    約-0.28mmを確認済み。いずれもdocstring参照)。ただしarm_lengthが長く
+    鼻先の丸め区間に深く入り込む極端なケースでは、front_surface_z_at_offset
+    の直線近似精度が落ちる既知の限界の影響を受け、この関数が違反を検出する
+    ケースが残る(PROJECT.md参照。GAが避けるべき個体として弾かれる想定)。
 
     その後、evaluate_frameを繰り返し呼び出すベンチマークで、この関数が
     全体の実行時間の大半(1回あたり約1.8秒)を占めていることが判明した。
