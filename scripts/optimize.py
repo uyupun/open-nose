@@ -28,17 +28,18 @@ FrameParams.__post_init__が要求する下限(arm_length>=1.0、clip_angle>0等
   arm_lengthに比例するようになった(evaluation.pyのモジュールdocstring
   「retentionにarm_lengthを掛ける理由」参照)ため、下限に張り付く傾向は
   解消された。実際に既定設定(pop_size=50, n_gen=60)で動かすと、上限
-  (15.0mm)まで達する前に、鼻先の丸め区間(y<0)に入って幾何的な制約
-  (grip_ring_margin等)に引っかかる約9〜10mm付近で釣り合う結果になった
+  (15.0mm)まで達する前に約6〜8.7mm付近で釣り合う結果になった。smoothness
+  制約をアーム→コネクタの継ぎ目まで含む経路全体に一般化した後(issue #2)は、
+  grip_ring_marginに加えてsmoothnessもこの範囲でほぼ同時に頭打ちになる
+  (アームが長いほどコネクタとの継ぎ目の折れが急になりやすいため)
 - arm_thickness: 下限0.5mm(針のように細すぎない程度)。上限8.0mmは
-  retention/proportion_penalty/holder_size_penaltyが頭打ちにする値より
-  余裕を持って大きくし、制約の境界が探索範囲の内側に来るようにした
-  (境界ちょうどが上限だと、GAがその外側を探れず境界形状を見誤る)。
-  実際に一番厳しい境界はholder_size_penalty(保持部の球の直径が
-  plug.diameterを超えた分を罰則にする。evaluation.py参照)で、
-  arm_thickness換算で約2.14mm(=plug.diameter/2/_HOLDER_RADIUS_RATIO)。
-  retention/proportion_penaltyの頭打ち(plug.diameter=6.0mm)はそれより
-  緩いため、実質的には無効化されている
+  retention/proportion_penaltyが頭打ちにする値より余裕を持って大きくし、
+  制約の境界が探索範囲の内側に来るようにした(境界ちょうどが上限だと、
+  GAがその外側を探れず境界形状を見誤る)。境界はplug.diameter(6.0mm)。
+  以前はholder_size_penalty(保持部の球の直径がplug.diameterを超えた分を
+  罰則にする制約)がarm_thickness換算で約2.14mmとより厳しい境界を作って
+  いたが、保持部の球自体を廃止した(evaluation.pyのモジュールdocstring
+  「holder_size_penaltyを廃止した理由」参照)ため、この境界は消滅した
 - holder_offset: 下限0(dataclass上の下限)。上限12.0mmは、デフォルト設定
   での実際の到達距離(dive_dist、約8mm)より少し余裕を持たせた値
   (PROJECT.mdの既知の限界の通り、dive_distを超えると評価に無反応になる
@@ -96,7 +97,7 @@ class FrameProblem(Problem):
         validate_target_reach(plug, nose)
         validate_anchor_height(nose)
 
-        super().__init__(n_var=5, n_obj=3, n_ieq_constr=8, xl=_XL, xu=_XU)
+        super().__init__(n_var=5, n_obj=3, n_ieq_constr=7, xl=_XL, xu=_XU)
         self.plug = plug
         self.nose = nose
 

@@ -11,5 +11,6 @@ dependencies = [
     "pymoo>=0.6.1.5",
     "rtree>=1.4.1",
     "scipy>=1.18.1",
+    "shapely>=2.1.2",
     "trimesh>=5.1.0",
 ]

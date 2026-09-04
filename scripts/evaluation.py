@@ -1,9 +1,9 @@
-"""フレームの評価関数(v3: 機能性・快適さ・意匠性の3目的+8制約)。
+"""フレームの評価関数(v3: 機能性・快適さ・意匠性の3目的+7制約)。
 PROJECT.md の「評価関数」に対応。
 
-frame_model.build_frame_pair が作る円柱メッシュを経由せず、経路の点列
-(build_side_paths)と鼻本体メッシュだけを使って評価する。円柱メッシュの
-生成コストを払わずに済むため、遺伝的アルゴリズムが個体ごとに繰り返し
+frame_model.build_frame_pair が作るチューブメッシュを経由せず、経路の点列
+(build_side_paths)と鼻本体メッシュだけを使って評価する。メッシュの生成
+コストを払わずに済むため、遺伝的アルゴリズムが個体ごとに繰り返し
 呼び出す用途でも軽量に計算できる。
 
 ## v2→v3: 「サブ項目の重み付け合成」をやめ、3目的+4制約に整理した
@@ -77,6 +77,24 @@ arm_length(接触区間の長さ)を掛けるようにした(メガネのアー�
 評価しないためGAの探索でarm_lengthが下限に張り付いていた既知の限界
 (PROJECT.md参照)も同時に解消され、実際にNSGA-IIを動かすとarm_lengthが
 トレードオフとして分布するようになったことを確認した。
+
+## holder_size_penaltyを廃止した理由(保持部の球の廃止)
+
+ユーザーが実際の候補メッシュを見たところ、「複数の独立したパーツがはっきり
+折れてつながっている」という指摘を受けた(issue #2)。原因を調査したところ、
+smoothness制約(角度の数値評価)とは別に、frame_model側のメッシュ生成方法
+(区間ごとに独立した円柱を生成して結合)自体が別部品の寄せ集めに見える
+原因になっていた(frame_model.pyのモジュールdocstring参照)。
+
+あわせて保持部(先端の球)の役割を調査したところ、評価関数のうち球の実在に
+依存する項目はholder_size_penaltyだけで、これ自体「球が鼻栓より大きな
+ドーム状になっていた」という球自身が生んだ問題を抑えるためだけに後から
+追加された対症療法だったと判明した。reach_gap制約により、コネクタの終端
+(path[-1])はすでに鼻栓の露出端にほぼ一致する位置まで到達しており、球は
+その上にさらに乗せた別部品に過ぎなかった。ユーザーと相談し、球を独立した
+部品としては廃止し(アーム+コネクタのチューブ自体の終端キャップが到達点を
+兼ねる)、それに伴いholder_size_penalty制約も不要になったため削除した
+(8制約→7制約)。
 """
 
 from dataclasses import dataclass
@@ -89,9 +107,9 @@ from models.frame_model import (
     SidePaths,
     arm_clearance_margin,
     build_side_paths,
+    full_path_points,
     grip_depth_margin,
     grip_ring_margin,
-    holder_radius,
     surface_following_points,
     validate_anchor_height,
     validate_target_reach,
@@ -108,16 +126,6 @@ _MIN_THICKNESS_RATIO = 0.03
 # retention・プロポーション評価(上限)で、arm_thicknessの寄与を頭打ちに
 # する基準。plug.diameterに対する倍率(理由は上のモジュールdocstring参照)
 _MAX_THICKNESS_TO_PLUG_DIAMETER = 1.0
-# 保持部(先端の球、models.frame_model.holder_radius)の直径の上限。
-# plug.diameterに対する倍率(_MAX_THICKNESS_TO_PLUG_DIAMETERと同じ、直径
-# 同士の比率で揃えている)。arm_thicknessをretention目当てで太くすると
-# 保持部の球(半径はarm_thicknessに比例)も連動して膨らみ、鼻栓本体
-# よりも大きなドーム状の突起になってしまう(実際にNSGA-IIの結果で
-# 確認された)。retentionのarm_thickness頭打ちと同じ発想で、挟んでいる
-# 相手(鼻栓)より保持部が大きくなる理由はないとみなし、直径がplug.diameter
-# (=鼻栓と同じ直径)を超えた分を罰則にする。デフォルト設定の保持部直径
-# (arm_thickness=2.0×_HOLDER_RADIUS_RATIO×2=5.6mm)はこの基準内に収まる
-_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER = 1.0
 
 
 def _retention(frame: FrameParams, plug: PlugParams) -> float:
@@ -184,36 +192,44 @@ def _fit_gap(
 
 
 def _smoothness(sides: list[SidePaths]) -> float:
-    """経路の滑らかさ(制約)。表面沿い区間からダイブ区間への遷移角度(度)。
-    0に近いほど、鼻栓へ向けて滑らかに連続する経路になる。「ジグザグ
-    しすぎていないか」という合否に近い性質のため、目的ではなく制約として
-    扱う(FrameScore参照)。
+    """経路全体の滑らかさ(制約)。経路上の連続する2区間がなす角度(度)の
+    最悪値。0に近いほど直線的、180に近いほど鋭く折れ返っている。「急に
+    折れ曲がる箇所がないか」という合否に近い性質のため、目的ではなく
+    制約として扱う(FrameScore参照)。
 
-    折れ線全体の角度をまとめて評価すると、最適解が単純な直線(無機質な
-    針金)に収束してしまう、あるいはサンプリング分割数の副作用を測るだけに
-    なりやすいため、設計意図(表面沿いの経路→鼻栓へのダイブ)を反映する
-    この1箇所の遷移角だけに絞る。
+    以前はコネクタの表面沿い区間からダイブ区間への遷移角(path末尾の1箇所)
+    だけを見ていた(折れ線全体を見ると最適解が単純な直線に収束してしまう
+    ことを懸念したため)。しかし実際にはアーム→コネクタの継ぎ目
+    (points[-1]==path[0]の前後)がこの範囲外で最も急に折れ曲がっており
+    (実測で約145度)、見逃していた(issue #2)。「基本的に滑らかに
+    つながっていてほしい」という要望は経路全体に対するものであり、直線に
+    寄っても悪化しない(smoothness=0が最良)ため、当初の懸念は却下し、
+    アーム(points)とコネクタ(path)を1本の折れ線として結合した経路全体の
+    各内部点を評価対象にする。
 
-    holder_offset=0(バリデーション上は有効)の場合、connector_pointsの
-    最終区間(approach→path[-1])の長さが0になり、diveベクトルがゼロに
-    なる。同様にincomingベクトル(path[-2]とpath[-3]、連続する2つの
-    表面沿いサンプル点の差)も、_CONNECTOR_SAMPLESの分割の仕方や
-    arm_end/targetのyがたまたま一致する等の縮退したジオメトリでは
-    ゼロになりうる。どちらの場合も「その区間が実質存在しない」とみなし、
-    追加の折れがないという意味で角度0を返す(0除算でNaNになることを避ける)。
+    points[-1]==path[0](arm_end)で連続しているため、frame_model.
+    full_path_points(_proportion_penaltyの全長計算と共通)でアーム+コネクタ
+    を1本の折れ線に結合する。
+
+    holder_offset=0(バリデーション上は有効)でconnector_pointsの最終区間の
+    長さが0になる場合や、_CONNECTOR_SAMPLESの分割・arm_end/targetのyが
+    たまたま一致する等の縮退したジオメトリで、連続する2点が同じ座標になり
+    区間ベクトルの長さが0になることがある。角度を定義できないため、その
+    箇所は評価から除外する(0除算でNaNになることを避ける)。
     """
     angles = []
-    for _, path in sides:
-        incoming = path[-2] - path[-3]
-        dive = path[-1] - path[-2]
-        incoming_norm = np.linalg.norm(incoming)
-        dive_norm = np.linalg.norm(dive)
-        if incoming_norm < 1e-9 or dive_norm < 1e-9:
-            angles.append(0.0)
-            continue
-        cos_angle = np.dot(incoming, dive) / (incoming_norm * dive_norm)
-        angles.append(float(np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))))
-    return max(angles)
+    for points, path in sides:
+        full_path = full_path_points(points, path)
+        for i in range(1, len(full_path) - 1):
+            incoming = full_path[i] - full_path[i - 1]
+            outgoing = full_path[i + 1] - full_path[i]
+            incoming_norm = np.linalg.norm(incoming)
+            outgoing_norm = np.linalg.norm(outgoing)
+            if incoming_norm < 1e-9 or outgoing_norm < 1e-9:
+                continue
+            cos_angle = np.dot(incoming, outgoing) / (incoming_norm * outgoing_norm)
+            angles.append(float(np.degrees(np.arccos(np.clip(cos_angle, -1.0, 1.0)))))
+    return max(angles) if angles else 0.0
 
 
 def _proportion_penalty(
@@ -228,7 +244,7 @@ def _proportion_penalty(
     """
     penalties = []
     for points, path in sides:
-        full_path = points + path[1:]
+        full_path = full_path_points(points, path)
         length = sum(
             float(np.linalg.norm(full_path[i + 1] - full_path[i]))
             for i in range(len(full_path) - 1)
@@ -240,23 +256,12 @@ def _proportion_penalty(
     return max(penalties)
 
 
-def _holder_size_penalty(frame: FrameParams, plug: PlugParams) -> float:
-    """保持部(先端の球)のサイズの破綻(制約)。実際の球の直径
-    (models.frame_model.holder_radiusの2倍)がplug.diameter基準の上限
-    (_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER)を超えた分を罰則にする(上限内は0)。
-    上限の考え方はモジュール上部の定数コメント参照(_proportion_penaltyの
-    太さ上限と同じ、挟んでいる相手より大きくなる理由はないという発想)。
-    """
-    max_diameter = plug.diameter * _MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETER
-    return max(0.0, 2 * holder_radius(frame) - max_diameter)
-
-
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約8つ。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約7つ。モジュールdocstring参照)。
 
     目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
-    retentionのみ最大化、他は最小化。制約(reach_gap以下の8項目)は
+    retentionのみ最大化、他は最小化。制約(reach_gap以下の7項目)は
     実行不可能個体を除外するための値で、いずれも0または一定値以下で
     あるべき(わざと悪化させて選ぶ理由がない)。実際の閾値判定は
     未実装で、生の値のまま返す(モジュールdocstring参照)。
@@ -272,22 +277,19 @@ class FrameScore:
     retention: float  # 機能性(最大化)
     pain: float  # 快適さ(最小化)
     fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
-    # 制約(8つ。すべて0または一定値以下であるべき)
-    reach_gap: float  # 保持部が鼻栓の露出端に届いているか(0であるべき)
+    # 制約(7つ。すべて0または一定値以下であるべき)
+    reach_gap: float  # コネクタが鼻栓の露出端に届いているか(0であるべき)
     fit_gap_max: float  # 局所的な浮きの最悪点(閾値: _FIT_GAP_MAX_THRESHOLD)
     smoothness: float  # 経路の折れの急峻さ(閾値: _SMOOTHNESS_THRESHOLD_DEG)
     proportion_penalty: float  # 太さの破綻(0であるべき)
     grip_depth_margin: float  # 起点が鼻の厚みを超えていないか(0以下であるべき)
     arm_clearance_margin: float  # 表面沿い区間のめり込み量(0以下であるべき)
     grip_ring_margin: float  # 起点断面の側方への突き出し量(0以下であるべき)
-    holder_size_penalty: float  # 保持部の球のサイズの破綻(0であるべき)
 
 
-# 制約の閾値。8項目のうち6項目(reach_gap/proportion_penalty/
-# grip_depth_margin/arm_clearance_margin/grip_ring_margin/
-# holder_size_penalty)は0以下が合格ラインになるよう既に設計されている
-# (holder_size_penaltyの閾値_MAX_HOLDER_DIAMETER_TO_PLUG_DIAMETERは
-# モジュール上部の定数コメント参照)ため、constraint_values側で判断が
+# 制約の閾値。7項目のうち5項目(reach_gap/proportion_penalty/
+# grip_depth_margin/arm_clearance_margin/grip_ring_margin)は0以下が
+# 合格ラインになるよう既に設計されているため、constraint_values側で判断が
 # 必要な実質的な閾値はfit_gap_max・smoothnessの2つだけ。いずれも仮置きで、
 # NSGA-IIを実際に動かし、生成される候補フレームを見ながら見直す前提
 
@@ -306,15 +308,19 @@ _FIT_GAP_MAX_THRESHOLD = 6.0
 # smoothnessの許容値(度)。180度(完全な折り返し)は明らかに破綻した形なので、
 # その手前で「一続きの滑らかな形状」とみなせる範囲を120度とする(直角
 # (90度)を超える曲がりもまだ意図的な形として許容し、それ以上を
-# 「ジグザグ」とみなす)。デフォルト設定の実測値(約64度)は十分収まる
+# 「ジグザグ」とみなす)。デフォルト設定の実測値(約94度)はこの範囲に収まるが、
+# 過去にパレート最適候補として出力されたclip_angle=5.74, arm_length=10.25等の
+# 個体は約145度(アーム→コネクタの継ぎ目、issue #2)で明確に違反する。この
+# 個体は今後の探索で除外される想定の値(GAを実際に動かし、生成される候補を
+# 見ながら見直す前提の暫定値である点は他の閾値と同じ)
 _SMOOTHNESS_THRESHOLD_DEG = 120.0
 
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
-    """FrameScoreの8つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    """FrameScoreの7つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
 
-    すでに0以下が合格ラインの6項目は_MARGIN_EPSILONを引くだけ(境界の
+    すでに0以下が合格ラインの5項目は_MARGIN_EPSILONを引くだけ(境界の
     誤差吸収)。fit_gap_max・smoothnessは実際の閾値を引く。
     """
     return (
@@ -325,7 +331,6 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.grip_depth_margin - _MARGIN_EPSILON,
         score.arm_clearance_margin - _MARGIN_EPSILON,
         score.grip_ring_margin - _MARGIN_EPSILON,
-        score.holder_size_penalty - _MARGIN_EPSILON,
     )
 
 
@@ -367,5 +372,4 @@ def evaluate_frame(
         grip_depth_margin=grip_depth_margin(frame, params, sides),
         arm_clearance_margin=arm_clearance_margin(sides, body, frame.arm_thickness),
         grip_ring_margin=grip_ring_margin(frame, body, sides),
-        holder_size_penalty=_holder_size_penalty(frame, plug),
     )

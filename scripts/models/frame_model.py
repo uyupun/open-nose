@@ -4,7 +4,14 @@
 (水泳用など)のように鼻先まわりだけで完結する小さなクリップとして表現する。
 鼻中隔の上あたりを起点に、鼻翼・鼻尖の少し上に沿ってarm_length伸びる
 アーム(arm_points)と、そこから鼻栓の露出端まで伸びるコネクタ
-(connector_points)の2区間で構成する(いずれも円柱の連結)。
+(connector_points)の2区間で構成する。メッシュ化(_tube_mesh)では
+アーム+コネクタを1本の連続したチューブとして表現する(以前は区間ごとに
+独立した円柱を生成して結合していたが、継ぎ目が別部品に見える原因になって
+いたため撤廃した。_tube_mesh参照)。先端の保持部(球)は、鼻栓の実在への
+依存がholder_size_penaltyという後付けの制約1つだけだったこと、コネクタの
+終端(reach_gap制約により鼻栓の露出端にほぼ一致する)がすでに到達点を
+兼ねていたことから、独立した部品としては廃止した(チューブ自体の終端
+キャップが到達点になる)。
 
 アーム(arm_points)はgrip_depth分だけ意図的に鼻表面へめり込ませ、メガネの
 アームが鼻に沿って保持力を得るのと同じ発想で接触区間を形成する。実際の
@@ -14,13 +21,13 @@
 外側を保ちながら非接触を保つ。
 
 経路の点列(arm_points, connector_points)は、メッシュ生成(build_frame_pair)
-だけでなくscripts/evaluation.pyの評価関数からも参照される。評価側は円柱
+だけでなくscripts/evaluation.pyの評価関数からも参照される。評価側はチューブ
 メッシュを経由せず、点列と鼻本体メッシュの距離だけで計算できるようにする
-ため、点列の計算とメッシュ化(_polyline_mesh)を分離している。
+ため、点列の計算とメッシュ化(_tube_mesh)を分離している。
 
 ファイル内の並び順: 定数・FrameParams → 経路の点列を計算する関数
 (arm_points, connector_points, build_side_paths等) → メッシュ化・幾何
-判定のユーティリティ(_polyline_mesh, _signed_distance_to_body) →
+判定のユーティリティ(_tube_mesh, _signed_distance_to_body) →
 validate_*(build_frame_pairが呼ぶ順) → build_frame_pair。
 
 frameに依存する検証(grip_depth_margin/arm_clearance_margin/
@@ -39,6 +46,7 @@ from typing import Literal
 
 import numpy as np
 import trimesh
+from shapely.geometry import Point
 
 from .nose_model import (
     NoseParams,
@@ -56,8 +64,6 @@ from .plug_model import PlugParams, plug_outer_end
 # 低いalphaにしている。OBJはalphaを保持できないため、この効果を確認するには
 # glTF(.glb)で書き出す(export_model.py/export_frame.py参照)
 _FRAME_COLOR = [90, 90, 100, 140]
-# 保持部(先端の球)の半径を、arm_thicknessに対する何倍にするか
-_HOLDER_RADIUS_RATIO = 1.4
 # アームの起点(クリップ位置)のy座標(鼻先=0からの距離、mm)。鼻中隔の
 # 上あたり、鼻翼が始まる手前を想定した固定値(_ALAE_BUMP_SPANの範囲内)
 _ARM_ANCHOR_Y = 6.0
@@ -98,6 +104,11 @@ _GRIP_RING_SAMPLES = 72
 # サンプリング分解能による小さなズレを吸収するための余裕
 # (validate_grip_ringのdocstring参照)
 _GRIP_RING_TOLERANCE = 0.15
+# _tube_meshが使う円形断面ポリゴンの近似精度。shapelyのbufferのresolutionは
+# 「1/4円あたりの分割数」なので、8を指定すると32角形になる。以前の
+# _polyline_mesh(trimesh.creation.cylinderの既定sections=32)と同等の
+# 滑らかさを保つ
+_TUBE_POLYGON_RESOLUTION = 8
 
 # 片側のアーム経路・コネクタ経路の点列のペア(points, path)。
 # build_side_pathsが返し、validate_arm_clearance・build_frame_pair・
@@ -109,7 +120,7 @@ SidePaths = tuple[list[np.ndarray], list[np.ndarray]]
 class FrameParams:
     """フレームの仮寸法パラメータ(単位: mmおよび度)。
 
-    棒状のアーム+球状の保持部という単純なプレースホルダーで、
+    アーム+コネクタの1本の連続したチューブという単純なプレースホルダーで、
     後から実際の造形(3Dプリント/粘土)に向けて調整・最適化する。
     """
 
@@ -234,6 +245,16 @@ def build_side_paths(
     return points, path
 
 
+def full_path_points(points: list[np.ndarray], path: list[np.ndarray]) -> list[np.ndarray]:
+    """アーム(points)とコネクタ(path)を1本の折れ線に結合した点列を返す。
+
+    points[-1]とpath[0]は同じ点(arm_end)のため、重複しないようpath[1:]を
+    使う。evaluation.pyのproportion_penalty(全長の計算)・smoothness(経路
+    全体の折れ角の計算)の両方から参照される。
+    """
+    return points + path[1:]
+
+
 def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
     """コネクタのうち、鼻表面に沿わせている(接触しない)区間だけの点列を返す。
 
@@ -247,14 +268,20 @@ def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
     return np.array(path[1:-1])
 
 
-def _polyline_mesh(points: list[np.ndarray], radius: float) -> trimesh.Trimesh:
-    """点列を、半径radiusの円柱で繋いだメッシュにする(重複点は区間を作らずスキップ)。"""
-    segments = [
-        trimesh.creation.cylinder(radius=radius, segment=[points[i], points[i + 1]])
-        for i in range(len(points) - 1)
-        if not np.allclose(points[i], points[i + 1])
-    ]
-    return trimesh.util.concatenate(segments)
+def _tube_mesh(points: list[np.ndarray], radius: float) -> trimesh.Trimesh:
+    """点列を、半径radiusの円形断面で押し出した1本の連続チューブにする。
+
+    以前(_polyline_mesh)は区間ごとに独立した(両端に平らな蓋がついた)
+    円柱を生成してconcatenateしていたが、隣接区間が頂点を共有しない
+    別部品の寄せ集めになり、「複数の独立したパーツがはっきり折れて
+    つながっている」ように見える原因になっていた(issue #2)。
+    trimesh.creation.sweep_polygonは円形ポリゴンを3D経路に沿って押し出し、
+    各内部点でミター(斜め)継ぎの断面リングを共有する単一の連続メッシュを
+    返すため、この問題が起きない。始点・終点には自動でキャップが付く
+    (sweep_polygonのcap引数、既定True)。
+    """
+    polygon = Point(0, 0).buffer(radius, resolution=_TUBE_POLYGON_RESOLUTION)
+    return trimesh.creation.sweep_polygon(polygon, np.array(points))
 
 
 def _signed_distance_to_body(
@@ -391,7 +418,7 @@ def validate_anchor_height(params: NoseParams) -> None:
 def arm_clearance_margin(
     sides: list[SidePaths], body: trimesh.Trimesh, arm_thickness: float
 ) -> float:
-    """コネクタの表面沿い区間(非接触区間、実際の円柱メッシュ)が、鼻本体
+    """コネクタの表面沿い区間(非接触区間、実際のチューブメッシュ)が、鼻本体
     メッシュにどれだけめり込んでいるかを返す(正=めり込み量、0以下=安全)。
     sidesはbuild_side_pathsで左右分を事前計算した(points, path)のリスト
     (呼び出し側で1度だけ計算し、メッシュ生成・他の検証と使い回すことで
@@ -412,7 +439,7 @@ def arm_clearance_margin(
     当初は中心線(surface_following_points)から表面までの符号なし距離が
     半径以上あるかで検証していたが、符号なし距離では「表面のすぐ近くに
     いる(安全)」と「わずかにめり込んでいる(危険)」を区別できないという
-    欠陥があった。実際に生成される円柱メッシュ(_polyline_mesh)の頂点に
+    欠陥があった。実際に生成されるチューブメッシュ(_tube_mesh)の頂点に
     対して符号付き距離(_signed_distance_to_body)を使うよう修正した
     (この関数がチェックする表面沿い区間そのものは、実測ではarm_thickness=
     6mm程度まで十分な余裕(2mm以上)があり、めり込みは発生しなかった。
@@ -436,7 +463,7 @@ def arm_clearance_margin(
     worst = -np.inf
     for _, path in sides:
         surface_points = surface_following_points(path)
-        tube = _polyline_mesh(list(surface_points), radius)
+        tube = _tube_mesh(list(surface_points), radius)
         signed_distance = _signed_distance_to_body(body, tube.vertices)
         min_signed = float(signed_distance.min())
         worst = max(worst, -min_signed)
@@ -455,7 +482,7 @@ def validate_arm_clearance(
     margin = arm_clearance_margin(sides, body, arm_thickness)
     if margin > 0:
         raise ValueError(
-            f"arm_thickness({arm_thickness})の円柱が実際に鼻表面へ"
+            f"arm_thickness({arm_thickness})のチューブが実際に鼻表面へ"
             f"めり込んでいる(最大めり込み量: {margin:.3f}mm)。"
             "arm_thicknessを小さくすること"
         )
@@ -543,20 +570,10 @@ def validate_grip_ring(
         )
 
 
-def holder_radius(frame: FrameParams) -> float:
-    """保持部(先端の球)の実際の半径を返す。build_frame_pairが球を生成する
-    際の計算式そのもの。scripts/evaluation.pyが保持部の絶対サイズ
-    (鼻栓本体に対して大きすぎないか)を制約として評価する際、
-    _HOLDER_RADIUS_RATIOを直接importして再計算するのではなくこの関数を
-    経由することで、実際に生成される球の半径と評価対象を一致させる。
-    """
-    return frame.arm_thickness * _HOLDER_RADIUS_RATIO
-
-
 def build_frame_pair(
     frame: FrameParams, plug: PlugParams, params: NoseParams
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
-    """左右のフレーム(アーム+保持部)を構築する(着色済み)。"""
+    """左右のフレーム(アーム+コネクタの1本の連続したチューブ)を構築する(着色済み)。"""
     validate_target_reach(plug, params)
     validate_anchor_height(params)
     body = build_nose_body(params)
@@ -569,12 +586,7 @@ def build_frame_pair(
 
     meshes = []
     for points, path in sides:
-        arm_mesh = _polyline_mesh(points, radius)
-        connector_mesh = _polyline_mesh(path, radius)
-        holder = trimesh.creation.icosphere(subdivisions=2, radius=holder_radius(frame))
-        holder.apply_translation(path[-1])
-
-        combined = trimesh.util.concatenate([arm_mesh, connector_mesh, holder])
+        combined = _tube_mesh(full_path_points(points, path), radius)
         combined.visual.face_colors = _FRAME_COLOR
         meshes.append(combined)
 
