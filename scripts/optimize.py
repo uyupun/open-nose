@@ -1,7 +1,7 @@
 """NSGA-II(pymoo)によるフレーム形状の多目的最適化スクリプト。
 
 evaluate_frame/constraint_values(scripts/evaluation.py)をpymooのProblemで
-ラップし、FrameParamsの12設計変数を探索してパレートフロントを求める。
+ラップし、FrameParamsの11設計変数を探索してパレートフロントを求める。
 可視化・結果表示はoptimize_report.py側の責務とし、このファイルは実行
 (FrameProblemの定義とminimize()の呼び出し)だけを持つ。個体数・世代数は
 未決定事項のため、CLI引数で調整できるようにしている。
@@ -15,26 +15,21 @@ optimize_report.py側で表示用に符号を戻す際もこの定数を使う(�
 
 ## 探索範囲(_SEARCH_SPACEの根拠)
 
-FrameParams.__post_init__が要求する下限(arm_length_1..4>=0等)はそのまま
-使う。上限は物理的な基準が明示されていない変数が多く、以下の考え方で
-仮置きした(fit_gap_max/smoothnessの閾値と同様、GAを実際に動かしながら
-見直す前提の暫定値):
+FrameParams.__post_init__が要求する下限(connector_length_1..4>=0等)は
+そのまま使う。上限は物理的な基準が明示されていない変数が多く、以下の
+考え方で仮置きした(fit_gap_max/smoothnessの閾値と同様、GAを実際に動かし
+ながら見直す前提の暫定値):
 
-- anchor_y: 下限1.0(0付近だと起点がほぼ鼻先そのものになり退化するため
-  少し余裕を持たせた)。上限20.0は、既定nose_len(52.2mm)での中腹閾値
-  (約26.1mm、anchor_height_margin参照)より小さく取り、制約の境界が
-  GAの探索範囲の内側に収まるようにした(境界ちょうどが上限だと、GAが
-  その外側を探れず境界形状を見誤るため。arm_thicknessの考え方と同じ)
-- arm_heading・arm_turn_2..4: 起点からの方向、および直前の区間からの
-  曲げ角(度)。frame_model.arm_pointsがsin/cosベースの計算に変わり
-  数値的な特異点がなくなったため、-180〜180度のフル可動域を探索範囲に
-  している(旧clip_angleが90度付近のtan()の発散を避けるため0〜60度に
-  制限していたのとは異なる)
-- arm_length_1..4: 下限0(dataclass上の下限。0にするとその区間の移動量は
-  無視されるが、対応する曲げ角は次の区間に引き継がれる。FrameParamsの
-  docstring参照)。上限8.0mmは、4区間合計で
-  最大32mmまで許容しつつ、1区間あたりは旧arm_lengthの上限(15.0mm)の
-  半分程度に収めた暫定値
+- connector_heading・connector_turn_2..4: アーム下端からの方向、および
+  直前の区間からの曲げ角(度)。frame_model.connector_pointsがsin/cosベース
+  の計算のため数値的な特異点がなく、-180〜180度のフル可動域を探索範囲に
+  している
+- connector_length_1..4: 下限0(dataclass上の下限。0にするとその区間の
+  移動量は無視されるが、対応する曲げ角は次の区間に引き継がれる。
+  FrameParamsのdocstring参照)。上限12.0mmは、コネクタがアーム下端
+  (y≈6付近)から鼻栓の露出端(y≈-4.6付近)まで約11mm以上、曲がりながら
+  到達する必要があることを踏まえ、arm_length系(旧設計、上限8.0mm)より
+  やや広めにした
 - arm_thickness: 下限0.5mm(針のように細すぎない程度)。上限8.0mmは
   retention/proportion_penaltyが頭打ちにする境界(plug.diameter=6.0mm)より
   余裕を持って大きくし、制約の境界が探索範囲の内側に来るようにした
@@ -49,9 +44,13 @@ FrameParams.__post_init__が要求する下限(arm_length_1..4>=0等)はその�
   個体では実行可能、太い個体では制約(grip_depth_margin)違反になる
   ちょうど境界付近を探索範囲に収める値とした
 
-探索変数が5から12に増えたため(issue #3、起点・方向・曲げ回数・曲げ方向を
-自由化)、既定のpop_size/n_genで従来と同等の収束が得られるかは未検証。
-実際にGAを動かした結果を見ながら見直す前提
+曲げの自由度は以前アーム側にあった(issue #3)が、(1) retentionには
+経路長さえあればよく曲げる意味がない、(2) 実際に形状を左右するのは
+コネクタの向きだった、(3) アーム側の平坦近似ベースの検証が大きく曲がる
+経路で実際の埋没を見逃す安全性バグがあった、という3点が判明し、コネクタ
+側へ委譲した(models.frame_modelのモジュールdocstring参照)。アーム側の
+起点(anchor_y)が固定定数に戻り、コネクタ側には起点に相当する変数が
+不要なため、探索変数の総数は12から11に減った。
 """
 
 import argparse
@@ -63,7 +62,7 @@ from pymoo.core.problem import Problem
 from pymoo.optimize import minimize
 
 from evaluation import constraint_values, evaluate_frame
-from models.frame_model import FrameParams, validate_target_reach
+from models.frame_model import FrameParams, validate_anchor_height, validate_target_reach
 from models.nose_model import NoseParams
 from models.plug_model import PlugParams
 from optimize_report import plot_evolution, print_summary
@@ -72,15 +71,14 @@ from optimize_report import plot_evolution, print_summary
 # FrameProblem._evaluateがFrameParamsを組み立てる)。根拠はモジュール
 # docstring参照
 _SEARCH_SPACE: list[tuple[str, float, float]] = [
-    ("anchor_y", 1.0, 20.0),
-    ("arm_heading", -180.0, 180.0),
-    ("arm_length_1", 0.0, 8.0),
-    ("arm_turn_2", -180.0, 180.0),
-    ("arm_length_2", 0.0, 8.0),
-    ("arm_turn_3", -180.0, 180.0),
-    ("arm_length_3", 0.0, 8.0),
-    ("arm_turn_4", -180.0, 180.0),
-    ("arm_length_4", 0.0, 8.0),
+    ("connector_heading", -180.0, 180.0),
+    ("connector_length_1", 0.0, 12.0),
+    ("connector_turn_2", -180.0, 180.0),
+    ("connector_length_2", 0.0, 12.0),
+    ("connector_turn_3", -180.0, 180.0),
+    ("connector_length_3", 0.0, 12.0),
+    ("connector_turn_4", -180.0, 180.0),
+    ("connector_length_4", 0.0, 12.0),
     ("arm_thickness", 0.5, 8.0),
     ("holder_offset", 0.0, 12.0),
     ("grip_depth", 0.0, 8.0),
@@ -97,18 +95,17 @@ OBJ_SIGN = np.array([-1.0, 1.0, 1.0])
 
 
 class FrameProblem(Problem):
-    """FrameParamsの12変数を探索するpymoo Problem。plug/noseは固定。"""
+    """FrameParamsの11変数を探索するpymoo Problem。plug/noseは固定。"""
 
     def __init__(self, plug: PlugParams, nose: NoseParams):
         # frameに依存しない検証(問題設定そのものの誤り)は、GAを回す前に
         # 一度だけ確認しておく。ここで弾かれず個体評価のたびに呼んでも
         # 結果は変わらないが(evaluate_frame参照)、不正な設定なら数千回の
-        # 評価を待たずに即座に気付きたい。anchor_yはFrameParamsの探索変数
-        # (frameに依存する)になったため、ここでは事前チェックできない
-        # (anchor_height_marginとしてevaluate_frameが個体ごとに制約評価する)
+        # 評価を待たずに即座に気付きたい
         validate_target_reach(plug, nose)
+        validate_anchor_height(nose)
 
-        super().__init__(n_var=12, n_obj=3, n_ieq_constr=8, xl=_XL, xu=_XU)
+        super().__init__(n_var=11, n_obj=3, n_ieq_constr=7, xl=_XL, xu=_XU)
         self.plug = plug
         self.nose = nose
 

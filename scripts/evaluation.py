@@ -17,27 +17,10 @@ frame_model.build_frame_pair が作るチューブメッシュを経由せず、
 - **目的(3つ、NSGA-IIが探索するトレードオフ)**: retention(機能性、
   最大化)・pain(快適さ、最小化。grip_depthを増やすとretentionは上がるが
   painも増えるという表裏一体の関係)・fit_gap(意匠性、最小化)
-- **制約(8つ、実行不可能個体を除外するための閾値判定)**: reach_gap・
+- **制約(7つ、実行不可能個体を除外するための閾値判定)**: reach_gap・
   fit_gap_max・smoothness・proportion_penalty・grip_depth_margin・
-  arm_clearance_margin・grip_ring_margin・anchor_height_margin
-  (FrameScore参照)。実際の閾値はいずれも暫定値で、NSGA-IIを実際に
-  動かしながら見直す前提
-
-## retentionにarm_heading/arm_turnを直接の乗数として含めない理由
-
-実際のジオメトリ(frame_model.arm_points)では、左右のアームは起点
-(x=0、arm_heading/arm_turn_2..4に依らず常に同じ点)から生えており、
-これらの角度は起点から離れた後の曲がり方(向き)にしか影響しない。
-実物のバネ式クリップのように、起点そのものの角度が挟み込む力を生む
-構造にはなっていないため、これらの角度をretentionの直接の乗数には
-含めない。
-
-ただし間接的な寄与はある。retentionはアームの実長(3D経路長。下記
-「retentionに接触区間の長さを掛ける理由」参照)に比例するため、
-arm_headingを大きくして鼻翼側へ開くほど、あるいはarm_turn_2..4で
-折れ曲がって迂回するほど実長が伸び、retentionへ寄与する。これは
-「起点の角度が力を生む」という物理モデルとは別の、「接触区間が長くなる」
-という接触面積の観点からの寄与であり、上記の判断と矛盾しない。
+  arm_clearance_margin・grip_ring_margin(FrameScore参照)。実際の閾値は
+  いずれも暫定値で、NSGA-IIを実際に動かしながら見直す前提
 
 ## retentionのarm_thicknessをplug.diameterで頭打ちにする理由
 
@@ -60,19 +43,19 @@ proportion_penaltyの上限も長さとの自己参照的な比率ではなく�
 
 アーム全体がgrip_depthで鼻表面へ埋め込まれる接触区間になっている
 (models.frame_model.arm_points参照)ため、接触面積の代理指標として、
-grip_depth×arm_thicknessにアームの実際の3D経路長(x方向の広がりも含む)を
-掛けている(メガネのアームが長く沿うほど落ちにくいのと同じ発想)。
+grip_depth×arm_thicknessにアームの実際の3D経路長を掛けている(メガネの
+アームが長く沿うほど落ちにくいのと同じ発想)。
 
-各区間の長さの単純合計(yの区間幅の総和)ではなく実際の経路長を使うのは、
-arm_headingを大きくして鼻翼側へ開くほど実際の接触区間が伸びるため。区間長の
-単純合計はarm_heading/arm_turn_2..4に依らず一定なので、これだけを使うと
-GAがこれらの角度を広げる理由を失う(issue #1。実際にパレート最適候補の
-clip_angle、当時の等価な変数が1〜6度に張り付く問題として顕在化した)。
-経路長を使えば、「起点の角度が力を生む」という物理モデル(上記
-「retentionにarm_heading/arm_turnを直接の乗数として含めない理由」参照)を
-持ち出さずに、接触面積の観点から自然にこれらの角度の寄与を反映できる。
-各区間の長さ(arm_length_1..4)には上限があるため、経路長も青天井に
-伸ばせる抜け穴にはならない(scripts/optimize.pyの_SEARCH_SPACE参照)。
+アームは固定形状(models.frame_model._ARM_ANCHOR_Y/_ARM_HEADING/
+_ARM_LENGTH)のため、この経路長はFrameParamsに依らない定数であり、
+retentionはgrip_depthとarm_thickness(頭打ち後)だけで決まる。以前は
+アーム自体に起点・方向・曲げの自由度を持たせ、経路長もそれに応じて
+伸縮していた(issue #1・issue #3)が、(1) retentionの計算には経路長さえ
+あればよく曲げる意味がない、(2) 実際に形状の見た目を左右するのはアームでは
+なくコネクタの向きだった、という2点が判明したため、曲げの自由度は
+コネクタ側(connector_heading/connector_turn_2..4/connector_length_1..4)
+へ委譲し、アームは再び固定形状に戻した(frame_model.pyのモジュール
+docstring参照)。
 """
 
 from dataclasses import dataclass
@@ -83,13 +66,13 @@ import trimesh
 from models.frame_model import (
     FrameParams,
     SidePaths,
-    anchor_height_margin,
     arm_clearance_margin,
     build_side_paths,
     full_path_points,
     grip_depth_margin,
     grip_ring_margin,
     surface_following_points,
+    validate_anchor_height,
     validate_target_reach,
 )
 from models.nose_model import NoseParams, build_nose_body
@@ -169,14 +152,23 @@ def _fit_gap(
     closest_point(rtreeによる空間索引を使う高速版)を使う。総当たりの
     closest_point_naiveより速く、結果は変わらない(frame_model.
     _signed_distance_to_bodyのdocstring参照)。
+
+    コネクタの区間長の合計が_STANDOFF_TRANSITION_DISTANCE未満の場合、
+    surface_following_pointsが空配列を返しうる(arm_clearance_marginの
+    docstring参照)。表面沿い区間が存在しないということなので、そちら側は
+    0(=浮きなし)として扱う。両側とも空なら(0.0, 0.0)を返す。
     """
     means, maxes = [], []
     for _, path in sides:
         surface_points = surface_following_points(path)
+        if len(surface_points) == 0:
+            continue
         _, distance, _ = trimesh.proximity.closest_point(body, surface_points)
         tube_distance = np.maximum(distance - arm_thickness / 2, 0.0)
         means.append(float(np.mean(tube_distance)))
         maxes.append(float(np.max(tube_distance)))
+    if not means:
+        return 0.0, 0.0
     return max(means), max(maxes)
 
 
@@ -201,8 +193,8 @@ def _smoothness(sides: list[SidePaths]) -> float:
     を1本の折れ線に結合する。
 
     holder_offset=0(バリデーション上は有効)でconnector_pointsの最終区間の
-    長さが0になる場合や、_CONNECTOR_SAMPLESの分割・arm_end/targetのyが
-    たまたま一致する等の縮退したジオメトリで、連続する2点が同じ座標になり
+    長さが0になる場合や、connector_length_1..4のいずれかが0(区間をスキップ)
+    になる場合など、縮退したジオメトリで連続する2点が同じ座標になり
     区間ベクトルの長さが0になることがある。角度を定義できないため、その
     箇所は評価から除外する(0除算でNaNになることを避ける)。
     """
@@ -244,26 +236,26 @@ def _proportion_penalty(
 
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約8つ。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約7つ。モジュールdocstring参照)。
 
     目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
-    retentionのみ最大化、他は最小化。制約(reach_gap以下の8項目)は
+    retentionのみ最大化、他は最小化。制約(reach_gap以下の7項目)は
     実行不可能個体を除外するための値で、いずれも0または一定値以下で
     あるべき(わざと悪化させて選ぶ理由がない)。実際の閾値判定は
     未実装で、生の値のまま返す(モジュールdocstring参照)。
 
-    grip_depth_margin/arm_clearance_margin/grip_ring_margin/
-    anchor_height_marginは、frame_model.pyのvalidate_*(build_frame_pairが
-    使う、例外を送出する版)と対になる制約値。frameの探索によって結果が
-    変わる検証なので、evaluate_frameは例外で止めずこれらを制約として
-    返す(モジュールdocstring・frame_model.pyのモジュールdocstring参照)。
+    grip_depth_margin/arm_clearance_margin/grip_ring_marginは、
+    frame_model.pyのvalidate_*(build_frame_pairが使う、例外を送出する版)
+    と対になる制約値。frameの探索によって結果が変わる検証なので、
+    evaluate_frameは例外で止めずこれらを制約として返す(モジュール
+    docstring・frame_model.pyのモジュールdocstring参照)。
     """
 
     # 目的(3つ)
     retention: float  # 機能性(最大化)
     pain: float  # 快適さ(最小化)
     fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
-    # 制約(8つ。すべて0または一定値以下であるべき)
+    # 制約(7つ。すべて0または一定値以下であるべき)
     reach_gap: float  # コネクタが鼻栓の露出端に届いているか(0であるべき)
     fit_gap_max: float  # 局所的な浮きの最悪点(閾値: _FIT_GAP_MAX_THRESHOLD)
     smoothness: float  # 経路の折れの急峻さ(閾値: _SMOOTHNESS_THRESHOLD_DEG)
@@ -271,15 +263,13 @@ class FrameScore:
     grip_depth_margin: float  # 起点が鼻の厚みを超えていないか(0以下であるべき)
     arm_clearance_margin: float  # 表面沿い区間のめり込み量(0以下であるべき)
     grip_ring_margin: float  # 起点断面の側方への突き出し量(0以下であるべき)
-    anchor_height_margin: float  # 起点が鼻の中腹を超えていないか(0以下であるべき)
 
 
-# 制約の閾値。8項目のうち6項目(reach_gap/proportion_penalty/
-# grip_depth_margin/arm_clearance_margin/grip_ring_margin/
-# anchor_height_margin)は0以下が合格ラインになるよう既に設計されている
-# ため、constraint_values側で判断が必要な実質的な閾値はfit_gap_max・
-# smoothnessの2つだけ。いずれも仮置きで、NSGA-IIを実際に動かし、
-# 生成される候補フレームを見ながら見直す前提
+# 制約の閾値。7項目のうち5項目(reach_gap/proportion_penalty/
+# grip_depth_margin/arm_clearance_margin/grip_ring_margin)は0以下が
+# 合格ラインになるよう既に設計されているため、constraint_values側で判断が
+# 必要な実質的な閾値はfit_gap_max・smoothnessの2つだけ。いずれも仮置きで、
+# NSGA-IIを実際に動かし、生成される候補フレームを見ながら見直す前提
 
 # 0以下が合格ラインの制約に共通で使う、浮動小数点誤差を吸収するための
 # ごく小さな余裕(mm、または比率)。境界ぎりぎりの計算結果が誤差でわずかに
@@ -305,10 +295,10 @@ _SMOOTHNESS_THRESHOLD_DEG = 120.0
 
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
-    """FrameScoreの8つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    """FrameScoreの7つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
 
-    すでに0以下が合格ラインの6項目は_MARGIN_EPSILONを引くだけ(境界の
+    すでに0以下が合格ラインの5項目は_MARGIN_EPSILONを引くだけ(境界の
     誤差吸収)。fit_gap_max・smoothnessは実際の閾値を引く。
     """
     return (
@@ -319,7 +309,6 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.grip_depth_margin - _MARGIN_EPSILON,
         score.arm_clearance_margin - _MARGIN_EPSILON,
         score.grip_ring_margin - _MARGIN_EPSILON,
-        score.anchor_height_margin - _MARGIN_EPSILON,
     )
 
 
@@ -328,12 +317,14 @@ def evaluate_frame(
 ) -> FrameScore:
     """FrameParams から機能性・快適さ・意匠性の評価値を計算する。
 
-    frameに依存しない検証(validate_target_reach。PlugParams/NoseParams
-    にしか依存せず、GAの探索中は結果が変わらない)は例外で即座に止める。
-    frameに依存する検証(grip_depth_margin等)は例外で止めず、制約値として
-    FrameScoreに含める(frame_model.pyのモジュールdocstring参照)。
+    frameに依存しない検証(validate_target_reach, validate_anchor_height。
+    PlugParams/NoseParamsにしか依存せず、GAの探索中は結果が変わらない)は
+    例外で即座に止める。frameに依存する検証(grip_depth_margin等)は
+    例外で止めず、制約値としてFrameScoreに含める(frame_model.pyの
+    モジュールdocstring参照)。
     """
     validate_target_reach(plug, params)
+    validate_anchor_height(params)
     body = build_nose_body(params)
     sides: list[SidePaths] = [
         build_side_paths(frame, plug, params, side) for side in (-1, 1)
@@ -359,5 +350,4 @@ def evaluate_frame(
         grip_depth_margin=grip_depth_margin(frame, params, sides),
         arm_clearance_margin=arm_clearance_margin(sides, body, frame.arm_thickness),
         grip_ring_margin=grip_ring_margin(frame, body, sides),
-        anchor_height_margin=anchor_height_margin(frame, params),
     )

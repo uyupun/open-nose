@@ -1,13 +1,19 @@
-"""フレームの仮形状(FrameParamsの12変数)。
+"""フレームの仮形状(FrameParamsの11変数)。
 
 メガネのように鼻筋(鼻の付け根)まで伸ばす必要はなく、実物の鼻クリップ
 (水泳用など)のように鼻先まわりだけで完結する小さなクリップとして表現する。
-起点(anchor_y、探索変数)から、4区間の折れ線(区間ごとに方向・長さを
-自由に決められる。arm_points参照)で構成するアームと、そこから鼻栓の
-露出端まで伸びるコネクタ(connector_points)の2区間で構成する。以前は
-起点が固定の定数(_ARM_ANCHOR_Y)、経路も単一直線(clip_angle+arm_length)
-だったため、NSGA-IIが見つける形状が似たようなシルエットに偏っていた
-(issue #3)。メッシュ化(_tube_mesh)では
+鼻中隔の上あたりを起点に固定形状で伸びるアーム(arm_points)と、そこから
+鼻栓の露出端まで4区間の折れ線(区間ごとに方向・長さを自由に決められる。
+connector_points参照)で向かうコネクタの2区間で構成する。曲げの自由度は
+以前(issue #3)アーム側にあったが、(1) retentionの計算には経路長さえ
+あればよく曲げる意味がない、(2) 実際に見た目を左右するのはコネクタの
+向きだった、(3) アーム側の平坦近似ベースの検証(grip_depth_margin/
+grip_ring_margin)が、固定角度の前提を超えて大きく曲がる経路では実際の
+埋没を見逃す(実測で最大4.2mm、鼻の内部に埋まっているのに安全と誤判定)
+という3点が判明したため、コネクタ側へ委譲した。コネクタの安全性は
+実メッシュに対する符号付き距離(arm_clearance_margin)という、近似に
+頼らない頑健なチェックですでに担保されているため、アーム側で起きたような
+見逃しが構造的に起きない。メッシュ化(_tube_mesh)では
 アーム+コネクタを1本の連続したチューブとして表現する(以前は区間ごとに
 独立した円柱を生成して結合していたが、継ぎ目が別部品に見える原因になって
 いたため撤廃した。_tube_mesh参照)。先端の保持部(球)は、鼻栓の実在への
@@ -33,13 +39,13 @@
 判定のユーティリティ(_tube_mesh, _signed_distance_to_body) →
 validate_*(build_frame_pairが呼ぶ順) → build_frame_pair。
 
-frameに依存する検証(anchor_height_margin/grip_depth_margin/
-arm_clearance_margin/grip_ring_margin)は、例外を送出するvalidate_*
-(build_frame_pairのメッシュ生成が使う)と、違反量を返すだけの*_margin
-(scripts/evaluation.pyのevaluate_frameが制約として使う)の2種類を
-用意している。frameは遺伝的アルゴリズムの探索変数なので、evaluate_frame
-側で例外を送出すると不正な個体1つで評価ループ全体が止まってしまうため。
-一方、frameに依存しない検証(validate_target_reach。PlugParams/
+frameに依存する検証(grip_depth_margin/arm_clearance_margin/
+grip_ring_margin)は、例外を送出するvalidate_*(build_frame_pairの
+メッシュ生成が使う)と、違反量を返すだけの*_margin(scripts/evaluation.py
+のevaluate_frameが制約として使う)の2種類を用意している。frameは
+遺伝的アルゴリズムの探索変数なので、evaluate_frame側で例外を送出すると
+不正な個体1つで評価ループ全体が止まってしまうため。一方、frameに依存
+しない検証(validate_target_reach, validate_anchor_height。PlugParams/
 NoseParamsにしか依存せず、探索中は結果が変わらない)は*_marginを
 用意せず、常に例外を送出する(問題設定そのものの誤りとして扱う)。
 """
@@ -69,17 +75,28 @@ from .plug_model import PlugParams, plug_outer_end
 # glTF(.glb)で書き出す(export_model.py/export_frame.py参照)
 _FRAME_COLOR = [90, 90, 100, 140]
 # 鼻の中腹(メガネのブリッジ・鼻孔拡張テープと干渉しうる領域)の下限を、
-# 鼻筋〜鼻先の長さ(nose_len)に対する比率で定義する。アーム起点(anchor_y)
-# がこれを超えて上に伸びると、他の日用品(メガネ・テープ)と干渉する
-# 可能性がある(anchor_height_margin参照)
+# 鼻筋〜鼻先の長さ(nose_len)に対する比率で定義する。アーム起点
+# (_ARM_ANCHOR_Y)がこれを超えて上にあると、他の日用品(メガネ・テープ)と
+# 干渉する可能性がある(validate_anchor_height参照)
 _MID_NOSE_RATIO = 0.5
-# アームの各区間(arm_points参照)を近似する折れ線の1区間あたりの分割数。
-# 鼻先に近づくほど前面の迫り出しが変化するため、直線1本ではなく複数点の
-# 折れ線で表面のカーブに追従させる
-_ARM_SAMPLES_PER_SEGMENT = 3
-# 保持部への接続経路(connector_points)を近似する折れ線の分割数。多いほど
-# 各yでの実測値(front_surface_z_at_offset)に沿った経路になり、表面に近づく
-_CONNECTOR_SAMPLES = 24
+# アームの起点のy座標(鼻先=0からの距離、mm)。固定値(_ALAE_BUMP_SPANの
+# 範囲内)。以前は探索変数(anchor_y)にしていたが、曲げの自由度をコネクタへ
+# 委譲した(モジュールdocstring参照)のに合わせて固定に戻した
+_ARM_ANCHOR_Y = 6.0
+# アームの開き角度(度、固定値)。以前の探索変数clip_angleの既定値を再利用
+# する(最も長くテストされた実績のある値のため)。区間が1つの固定形状に
+# 戻ったため、tan()ベースの計算(90度付近で発散するが、この固定値では
+# 発散域に近づく余地がない)で十分
+_ARM_HEADING = 20.0
+# アームの長さ(mm、固定値)。以前の探索変数arm_lengthの既定値を再利用する
+_ARM_LENGTH = 6.0
+# アームを近似する折れ線の分割数。鼻先に近づくほど前面の迫り出しが変化する
+# ため、直線1本ではなく複数区間の折れ線で表面のカーブに追従させる
+_ARM_SAMPLES = 5
+# コネクタの各区間(connector_points参照)を近似する折れ線の1区間あたりの
+# 分割数。多いほど各点での実測値(front_surface_z_at_offset)に沿った経路
+# になり、表面に近づく
+_CONNECTOR_SAMPLES_PER_SEGMENT = 6
 # コネクタ(connector_points、鼻栓へ向かう非接触区間)の「チューブの表面」を
 # 鼻の表面からどれだけ浮かせるか(mm)。中心線(connector_pointsが計算する
 # 点列)はこれに加えてarm_thickness/2(チューブの半径)も上乗せした位置に
@@ -94,16 +111,23 @@ _CONNECTOR_SAMPLES = 24
 # marginに安全マージン(実測約-0.28mm)を持たせるよう4.0に引き上げた
 _SURFACE_CLEARANCE = 4.0
 # アーム→コネクタの継ぎ目で、埋め込み(-grip_depth)から浮かせ(+standoff)へ
-# 何サンプルかけて線形に遷移させるか(connector_points参照)。瞬時に
-# 切り替えると、yの刻み幅がアーム(1.5mm間隔)とコネクタ(0.2mm間隔)で
-# 大きく異なるため、短いy区間にオフセットの変化が集中し、経路が不自然に
-# 折れ曲がって見える原因になっていた(issue #2、実測で94〜108度)。既定値・
-# 実際のパレート候補で角度とめり込み量を計測しながら決めた経験的な値。
-# アームが鼻先の丸め区間に深く入り込む極端なケースでは、
-# front_surface_z_at_offsetの直線近似精度が落ちる既知の限界の影響を受け、
-# この遷移だけでは十分に滑らかにならない場合が残る(smoothness/
-# arm_clearance_margin制約がそうした個体をGAの探索から除外する想定)
-_STANDOFF_TRANSITION_SAMPLES = 18
+# 何mm(区間1の始点からの実際の移動距離)かけて線形に遷移させるか
+# (connector_points参照)。瞬時に切り替えると、短い区間にオフセットの変化が
+# 集中し、経路が不自然に折れ曲がって見える原因になっていた(issue #2、
+# 当時のアーム・コネクタ間でサンプル間隔が大きく異なる実装で実測94〜108度)。
+# サンプル数ではなく実際の移動距離を基準にしているのは、以前はサンプル数
+# (旧_STANDOFF_TRANSITION_SAMPLES)ベースだったが、コネクタが区間ごとの
+# 自由な折れ線になった際、区間の長さが0(実質スキップ)だと同じ座標に
+# 留まる点がサンプル数だけを消費してしまい、実際に空間移動している区間の
+# 遷移が完了しないまま安全判定から除外され、実際には埋まっている点を
+# surface_following_pointsが見逃す不具合があったため(既定値でも発生、
+# 実測で最大-1.28mm)。既定値・実際のパレート候補で角度とめり込み量を
+# 計測しながら決めた経験的な値。コネクタが鼻先の丸め区間に深く入り込む
+# 極端なケースでは、front_surface_z_at_offsetの直線近似精度が落ちる既知の
+# 限界の影響を受け、この遷移だけでは十分に滑らかにならない場合が残る
+# (smoothness/arm_clearance_margin制約がそうした個体をGAの探索から
+# 除外する想定)
+_STANDOFF_TRANSITION_DISTANCE = 3.5
 # validate_grip_ringが起点の円形断面をサンプルする点数。36点(10度刻み)
 # だと、真の最大突き出し点(赤道付近)がサンプル点からわずかにずれている
 # 場合に見逃すことがある(実測でmm未満・3Dプリンタの造形精度を下回る
@@ -132,32 +156,35 @@ class FrameParams:
     アーム+コネクタの1本の連続したチューブという単純なプレースホルダーで、
     後から実際の造形(3Dプリント/粘土)に向けて調整・最適化する。
 
-    アームは起点(anchor_y)から4区間の折れ線(arm_heading/arm_turn_2..4が
-    各区間の方向、arm_length_1..4が各区間の長さ)で表現する(arm_points
+    アームは固定形状(_ARM_ANCHOR_Y/_ARM_HEADING/_ARM_LENGTH)。曲げの
+    自由度はコネクタ側にある: connector_heading/connector_turn_2..4が
+    各区間の方向、connector_length_1..4が各区間の長さ(connector_points
     参照)。区間の長さを0にすると、その区間は移動量を持たない(同一点に
-    とどまる)ため見た目には現れないが、その区間の曲げ角(arm_turn_*)
+    とどまる)ため見た目には現れないが、その区間の曲げ角(connector_turn_*)
     自体は次の区間の方向計算に引き継がれる(タートルグラフィックス方式で
-    「曲がってから進む」という順序のため。arm_points参照)。長さ0の区間が
-    連続しても、_smoothness/_path_lengthはすでに距離0の区間を評価対象
-    から除外する実装になっているため、追加の特別扱いは不要
+    「曲がってから進む」という順序のため。connector_points参照)。長さ0の
+    区間が連続しても、_smoothness/_path_lengthはすでに距離0の区間を
+    評価対象から除外する実装になっているため、追加の特別扱いは不要
     (scripts/evaluation.py参照)。
     """
 
-    anchor_y: float = 6.0
-    arm_heading: float = 20.0
-    arm_length_1: float = 6.0
-    arm_turn_2: float = 0.0
-    arm_length_2: float = 0.0
-    arm_turn_3: float = 0.0
-    arm_length_3: float = 0.0
-    arm_turn_4: float = 0.0
-    arm_length_4: float = 0.0
+    connector_heading: float = 24.0
+    connector_length_1: float = 5.5
+    connector_turn_2: float = 0.0
+    connector_length_2: float = 0.0
+    connector_turn_3: float = 0.0
+    connector_length_3: float = 0.0
+    connector_turn_4: float = 0.0
+    connector_length_4: float = 0.0
     arm_thickness: float = 2.0
     holder_offset: float = 12.0
     grip_depth: float = 0.5
 
     def __post_init__(self) -> None:
-        for name in ("arm_length_1", "arm_length_2", "arm_length_3", "arm_length_4"):
+        for name in (
+            "connector_length_1", "connector_length_2",
+            "connector_length_3", "connector_length_4",
+        ):
             value = getattr(self, name)
             if value < 0:
                 raise ValueError(f"{name} は0以上にすること: {value}")
@@ -169,30 +196,19 @@ class FrameParams:
             raise ValueError(f"grip_depth は0以上にすること: {self.grip_depth}")
 
 
-# アームの各区間の(方向フィールド名, 長さフィールド名)。区間1(arm_heading)
-# だけは-y軸(鼻先方向)を0度とした絶対方向、区間2以降(arm_turn_2..4)は
-# 直前の区間の方向からの相対的な曲げ角として扱う(arm_points参照)
-_ARM_SEGMENTS = [
-    ("arm_heading", "arm_length_1"),
-    ("arm_turn_2", "arm_length_2"),
-    ("arm_turn_3", "arm_length_3"),
-    ("arm_turn_4", "arm_length_4"),
-]
-
-
 def arm_points(
     frame: FrameParams, params: NoseParams, side: Literal[-1, 1]
 ) -> list[np.ndarray]:
-    """起点(anchor_y)から、4区間の折れ線に沿って伸びるアームの経路(点列)を
-    返す(points[0]が起点、points[-1]がアーム下端)。
+    """固定形状(_ARM_ANCHOR_Y/_ARM_HEADING/_ARM_LENGTH)の埋め込みアームの
+    経路(点列)を返す(points[0]が起点、points[-1]がアーム下端)。
 
-    区間1(arm_heading)は-y軸(鼻先方向)を0度とした絶対方向、区間2以降
-    (arm_turn_2..4)は直前の区間の方向からの相対的な曲げ角として順に
-    累積する(タートルグラフィックス方式。_ARM_SEGMENTS参照)。以前は
-    起点が固定定数、方向もclip_angle 1つの直線だったが、起点位置・方向・
-    曲げ回数・曲げ方向をすべて自由にすることで、NSGA-IIが多様な形状を
-    探索できるようにした(issue #3)。sideは各区間の方向のx成分にだけ
-    掛けて左右を鏡映する(x=0の起点から左右対称に生えるため)。
+    以前は起点位置・方向・曲げをFrameParamsの探索変数にしていたが、(1)
+    retentionの計算には経路長さえあればよく曲げる意味がない、(2) 実際に
+    見た目を左右するのはコネクタの向きだった、(3) この関数が使う平坦近似
+    (front_surface_z_at_center/front_surface_z_at_offset)は、固定角度の
+    前提を超えて大きく曲がる経路では実際の埋没を見逃す(実測で最大4.2mm)、
+    という3点が判明したため、固定形状に戻し、曲げの自由度はconnector_points
+    へ委譲した(モジュールdocstring参照)。
 
     メガネのアームが鼻翼・鼻尖の少し上に沿って保持力を得るのと同じ発想で、
     アーム全区間をgrip_depthの分だけ前面境界より内側(z方向)にめり込ませる
@@ -204,71 +220,103 @@ def arm_points(
     x=0ではfront_surface_z_at_centerと同じ値を返す(内部でcenter_zを
     起点に補間しているだけのため)ので、この使い分けは値の不連続を生まない。
     """
-    cx, y = 0.0, frame.anchor_y
-    points = [
-        np.array([0.0, y, front_surface_z_at_center(params, y) - frame.grip_depth])
-    ]
+    ys = np.linspace(_ARM_ANCHOR_Y, _ARM_ANCHOR_Y - _ARM_LENGTH, _ARM_SAMPLES)
+    rad = np.radians(_ARM_HEADING)
 
-    for i, (angle_field, length_field) in enumerate(_ARM_SEGMENTS):
+    points = []
+    for i, y in enumerate(ys):
+        x = side * np.tan(rad) * (_ARM_ANCHOR_Y - y)
+        front_z = (
+            front_surface_z_at_center(params, y)
+            if i == 0
+            else front_surface_z_at_offset(params, y, x)
+        )
+        points.append(np.array([x, y, front_z - frame.grip_depth]))
+    return points
+
+
+# コネクタの各区間の(方向フィールド名, 長さフィールド名)。区間1
+# (connector_heading)だけは-y軸(鼻先方向)を0度とした絶対方向、区間2以降
+# (connector_turn_2..4)は直前の区間の方向からの相対的な曲げ角として扱う
+# (connector_points参照)。以前はこの曲げの自由度をアーム側(_ARM_SEGMENTS)
+# に持たせていたが、コネクタ側へ委譲した(モジュールdocstring参照)
+_CONNECTOR_SEGMENTS = [
+    ("connector_heading", "connector_length_1"),
+    ("connector_turn_2", "connector_length_2"),
+    ("connector_turn_3", "connector_length_3"),
+    ("connector_turn_4", "connector_length_4"),
+]
+
+
+def connector_points(
+    frame: FrameParams,
+    params: NoseParams,
+    arm_end: np.ndarray,
+    target: np.ndarray,
+    side: Literal[-1, 1],
+) -> list[np.ndarray]:
+    """アーム下端(arm_end)から、4区間の折れ線で自由に曲がりながら鼻栓の
+    露出端(target)まで到達する経路(点列)を返す(path[0]がarm_end、
+    path[-1]がtargetへ向けた最終到達点)。
+
+    区間1(connector_heading)は-y軸(鼻先方向)を0度とした絶対方向、区間2
+    以降(connector_turn_2..4)は直前の区間の方向からの相対的な曲げ角として
+    順に累積する(タートルグラフィックス方式。arm_points(issue #3時点の
+    実装)と同じ考え方。_CONNECTOR_SEGMENTS参照)。sideは各区間の方向のx
+    成分にだけ掛けて左右を鏡映する。以前はarm_endからtargetへの直線補間
+    だったが、実際に見た目(向き)を左右するのはこの区間だったため、曲げの
+    自由度をアーム側から委譲した(モジュールdocstring参照)。
+
+    各点の高さ(z)は、その時点のx, yでの実測値(front_surface_z_at_offset)
+    を基準に、表面からのオフセットを加えて決める。オフセットは、arm_end
+    直後で瞬時にstandoff(非接触)へ切り替えず、arm_endからの実際の移動
+    距離(traveled、xy平面上の累積距離)が_STANDOFF_TRANSITION_DISTANCEに
+    達するまで、-grip_depth(arm_endの埋め込み)からstandoffへ線形に遷移
+    させる(瞬時に切り替えると経路が不自然に折れ曲がって見える。issue #2。
+    _SURFACE_CLEARANCEのdocstring参照)。サンプル数ではなく移動距離を使う
+    理由は_STANDOFF_TRANSITION_DISTANCEのdocstring参照(区間の長さが0
+    (実質スキップ)の場合に、その区間のサンプルが移動距離を消費しない
+    ようにするため)。遷移区間(traveledが_STANDOFF_TRANSITION_DISTANCE
+    未満)の点は意図的にまだ(部分的に)埋め込まれた状態のため、
+    surface_following_points(fit_gap/arm_clearance_marginが非接触区間の
+    判定に使う)はこの区間も除外する(pathの各点間のxy平面距離から
+    traveledを再計算して判定する)。
+
+    自由区間の終点(approach)から、最後にtargetへ向けてzも含めて直線で
+    差し込む(approach→path[-1])。targetのyは鼻本体メッシュの範囲より
+    外側(validate_target_reachが検証する)なので、この区間は鼻の実体が
+    存在しない位置を通ることになり安全。holder_offsetは、この最後の区間で
+    targetまでの距離を超えないようクランプした上での実際の到達距離
+    (target - path[-1]が0でなければ、到達しきれていないことを意味する)。
+    自由区間がどこに着地しても、この最終区間がtargetへの到達を保証する。
+    """
+    standoff = _SURFACE_CLEARANCE + frame.arm_thickness / 2
+
+    path = [arm_end]
+    # arm_endのxはすでにside倍された実座標なので、side * arm_end[0]で
+    # 正準化(mirror前)座標に戻す(side**2 == 1のため、符号が打ち消される)。
+    # 以降はarm_pointsと同じくcx, yを正準化座標のまま累積し、xを出力する
+    # 際にだけside倍して鏡映する
+    cx, y = side * arm_end[0], arm_end[1]
+    traveled = 0.0  # arm_endからのxy平面上の累積移動距離(mm)
+    heading = 0.0  # i==0で必ず上書きされる(区間1は絶対方向のため)
+    for i, (angle_field, length_field) in enumerate(_CONNECTOR_SEGMENTS):
         angle = getattr(frame, angle_field)
         heading = angle if i == 0 else heading + angle
         length = getattr(frame, length_field)
         rad = np.radians(heading)
-        for s in range(1, _ARM_SAMPLES_PER_SEGMENT + 1):
-            t = s / _ARM_SAMPLES_PER_SEGMENT
+        for s in range(1, _CONNECTOR_SAMPLES_PER_SEGMENT + 1):
+            t = s / _CONNECTOR_SAMPLES_PER_SEGMENT
             seg_cx = cx + length * t * np.sin(rad)
             seg_y = y + length * t * -np.cos(rad)
             x = side * seg_cx
-            front_z = front_surface_z_at_offset(params, seg_y, x)
-            points.append(np.array([x, seg_y, front_z - frame.grip_depth]))
+            surface_z = front_surface_z_at_offset(params, seg_y, x)
+            tt = min((traveled + length * t) / _STANDOFF_TRANSITION_DISTANCE, 1.0)
+            offset = (1 - tt) * -frame.grip_depth + tt * standoff
+            path.append(np.array([x, seg_y, surface_z + offset]))
         cx += length * np.sin(rad)
         y += length * -np.cos(rad)
-    return points
-
-
-def connector_points(
-    frame: FrameParams, params: NoseParams, arm_end: np.ndarray, target: np.ndarray
-) -> list[np.ndarray]:
-    """アーム下端(arm_end)から鼻栓の露出端(target)まで到達する経路(点列)を
-    返す(path[0]がarm_end、path[-1]がtargetへ向けた最終到達点)。
-
-    arm_endからtargetへ直線で向かうと鼻の内部を貫通しうるため、まず
-    arm_pointsと同じ考え方(その時点のyでの前面迫り出しより外側を保つ)で
-    targetのx, yまで折れ線で近づく(_CONNECTOR_SAMPLES点、xはarm_endから
-    targetまで線形補間)。鼻先の丸め区間はyが進むにつれ必要な高さが
-    下がっていく形状なので、区間ごとに実測値(front_surface_z_at_offset。
-    xが変わるためarm_pointsのi>0の点と同じくx考慮の値を使う。以前は
-    x非考慮(常に中心x=0の値を使う)だったため、外側の点ほど実際の表面
-    より必要以上に浮いてしまっていた)を計算することで表面に近い経路になる。
-
-    表面からの浮かせ方(オフセット)は、arm_end直後で瞬時にstandoffへ
-    切り替えず、_STANDOFF_TRANSITION_SAMPLESにわたって-grip_depth(arm_end
-    の埋め込み)からstandoffへ線形に遷移させる。瞬時に切り替えると、yの
-    刻み幅がアーム(1.5mm間隔)とコネクタ(0.2mm間隔)で大きく異なるため、
-    短いy区間にオフセットの変化が集中し、経路が不自然に折れ曲がって
-    見える原因になっていた(issue #2。_SURFACE_CLEARANCEのdocstring参照)。
-    遷移区間の点は意図的にまだ(部分的に)埋め込まれた状態のため、
-    surface_following_points(fit_gap/arm_clearance_marginが非接触区間の
-    判定に使う)はこの区間も除外する。
-
-    最後にtargetへ向けてzを差し込む(approach→path[-1])。targetのyは
-    鼻本体メッシュの範囲より外側(validate_target_reachが検証する)なので、
-    この区間は鼻の実体が存在しない位置を通ることになり安全。
-    holder_offsetは、この最後の区間でtargetまでの距離を超えないよう
-    クランプした上での実際の到達距離(target - path[-1]が0でなければ、
-    到達しきれていないことを意味する)
-    """
-    ys = np.linspace(arm_end[1], target[1], _CONNECTOR_SAMPLES)
-    xs = np.linspace(arm_end[0], target[0], _CONNECTOR_SAMPLES)
-    standoff = _SURFACE_CLEARANCE + frame.arm_thickness / 2
-
-    path = [arm_end]
-    for i in range(1, _CONNECTOR_SAMPLES):
-        y, x = ys[i], xs[i]
-        surface_z = front_surface_z_at_offset(params, y, x)
-        t = min(i / _STANDOFF_TRANSITION_SAMPLES, 1.0)
-        offset = (1 - t) * -frame.grip_depth + t * standoff
-        path.append(np.array([x, y, surface_z + offset]))
+        traveled += length
     approach = path[-1]
 
     dive = target - approach
@@ -292,7 +340,7 @@ def build_side_paths(
     points = arm_points(frame, params, side)
     arm_end = points[-1]
     target = plug_outer_end(plug, params.nostril_gap, params.tip_depth_front, side)
-    path = connector_points(frame, params, arm_end, target)
+    path = connector_points(frame, params, arm_end, target, side)
     return points, path
 
 
@@ -311,15 +359,32 @@ def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
 
     アーム(arm_points)は全区間がgrip_depthで意図的に鼻表面へ埋め込まれる
     接触区間(evaluation.pyのretention/grip_depth_margin/grip_ring_margin
-    で別途評価する)なので対象外。コネクタの先頭_STANDOFF_TRANSITION_
-    SAMPLES点も、埋め込み(-grip_depth)から浮かせ(standoff)への遷移区間
-    (connector_points参照)で意図的にまだ(部分的に)埋め込まれた状態のため
-    同様に対象外。コネクタ最終点(path[-1])は鼻栓へ意図的に離れていく
-    ダイブ区間の到達点なので除外する。path[0]はarm_end(=arm_pointsの
-    最終点)と同じ点のため、重複しないようpath[1:-1]から使う。
+    で別途評価する)なので対象外。コネクタの先頭、arm_endからのxy平面上の
+    移動距離が_STANDOFF_TRANSITION_DISTANCE未満の点も、埋め込み
+    (-grip_depth)から浮かせ(standoff)への遷移区間(connector_points参照)
+    で意図的にまだ(部分的に)埋め込まれた状態のため同様に対象外。移動距離は
+    pathの隣接する点同士のxy平面距離を累積して求める(connector_points側で
+    実際に使った値と、生成に使った(x, y)がそのまま点として残っているため
+    一致する)。コネクタ最終点(path[-1])は鼻栓へ意図的に離れていくダイブ
+    区間の到達点なので除外する。path[0]はarm_end(=arm_pointsの最終点)と
+    同じ点のため、重複しないよう候補からは除く。
+
+    (既知の限界: path[-1]を除外しているのは「targetのyが鼻本体メッシュの
+    y範囲より外側にある(validate_target_reach)ため安全」という前提による
+    ものだが、これは中心線だけの議論で、実際のチューブの半径
+    (arm_thickness/2)を考慮していない。ダイブの向きがy軸に対して斜めだと
+    チューブの終端キャップがy方向に半径分近く広がり、targetのyがメッシュ
+    境界から半径未満しか離れていない場合はキャップの一部が実際にメッシュへ
+    食い込むことを実測で確認している。詳細はissue参照)
+
     evaluation.pyのfit_gap、およびarm_clearance_marginの両方から参照される。
     """
-    return np.array(path[1 + _STANDOFF_TRANSITION_SAMPLES : -1])
+    xy = np.array([p[:2] for p in path])
+    step_distance = np.linalg.norm(np.diff(xy, axis=0), axis=1)
+    traveled = np.cumsum(step_distance)  # traveled[i]はpath[0]からpath[i+1]までの距離
+    candidates = np.array(path[1:-1])
+    past_transition = traveled[:-1] >= _STANDOFF_TRANSITION_DISTANCE
+    return candidates[past_transition]
 
 
 def _tube_mesh(points: list[np.ndarray], radius: float) -> trimesh.Trimesh:
@@ -387,32 +452,20 @@ def validate_target_reach(plug: PlugParams, params: NoseParams) -> None:
             )
 
 
-def anchor_height_margin(frame: FrameParams, params: NoseParams) -> float:
-    """アーム起点(anchor_y)が鼻の中腹(_MID_NOSE_RATIO)をどれだけ超えて
-    いるかを返す(正=違反量、0以下=安全)。
+def validate_anchor_height(params: NoseParams) -> None:
+    """アーム起点(_ARM_ANCHOR_Y)が鼻の中腹(_MID_NOSE_RATIO)より下にある
+    ことを検証する。
 
-    anchor_yはFrameParamsの探索変数(GAの探索によって結果が変わる)ため、
-    frame_model.pyのモジュールdocstringが定める方針どおり、例外ではなく
-    このmargin関数で違反量を返す。evaluate_frameは例外で止めずこの値を
-    制約として使う。build_frame_pair(メッシュ生成)は例外で止めたいので
-    validate_anchor_heightを使う。
+    _ARM_ANCHOR_Yは固定の定数で、FrameParamsのどの探索変数を動かしても
+    値は変わらないため、デフォルトのNoseParamsでは常に満たされる。ただし
+    nose_lenが小さい鼻モデル(将来、多様な鼻形状に対応する場合)ではこの
+    前提が崩れうるため、build_frame_pair・evaluate_frameの両方から共通で
+    呼び出して検証する。
     """
     mid_nose_y = params.nose_len * _MID_NOSE_RATIO
-    return frame.anchor_y - mid_nose_y
-
-
-def validate_anchor_height(frame: FrameParams, params: NoseParams) -> None:
-    """anchor_height_marginが正(=違反)の場合に例外を送出する。
-
-    build_frame_pair(メッシュ生成)から使う想定。evaluate_frame(評価)は
-    frameに依存するこの検証を例外ではなく制約として扱うため、
-    anchor_height_marginを直接使う(同関数のdocstring参照)。
-    """
-    margin = anchor_height_margin(frame, params)
-    if margin >= 0:
-        mid_nose_y = frame.anchor_y - margin
+    if _ARM_ANCHOR_Y >= mid_nose_y:
         raise ValueError(
-            f"アーム起点(y={frame.anchor_y})が鼻の中腹(y={mid_nose_y:.2f})以上に"
+            f"アーム起点(y={_ARM_ANCHOR_Y})が鼻の中腹(y={mid_nose_y:.2f})以上に"
             "あり、メガネのブリッジや鼻孔拡張テープと干渉する可能性がある"
         )
 
@@ -504,18 +557,25 @@ def arm_clearance_margin(
 
     _SURFACE_CLEARANCE(4.0mm)は、この傾きによる余裕不足を踏まえて
     既定値で安全マージン(実測約-0.28mm)を持つよう調整した値(定数の
-    docstring参照)。アームが長く鼻先の丸め区間に深く入り込む極端な
+    docstring参照)。コネクタが鼻先の丸め区間に深く入り込む極端な
     ケースでは、front_surface_z_at_offsetの近似精度が落ちる既知の限界の
     影響でこの関数が違反を検出するケースが残る(GAが避けるべき個体として
     弾かれる想定)。
 
     _signed_distance_to_body側をrtreeで高速化しており(同docstring参照)、
     この関数自体の近似度は変えていない。
+
+    コネクタの区間長の合計が_STANDOFF_TRANSITION_DISTANCE未満の場合、
+    surface_following_pointsが空配列を返しうる(遷移が完了する前に経路が
+    終わるため)。その場合はそちら側の表面沿い区間そのものが存在しない
+    ということなので、そちら側の判定はスキップする(worstに寄与させない)。
     """
     radius = arm_thickness / 2
     worst = -np.inf
     for _, path in sides:
         surface_points = surface_following_points(path)
+        if len(surface_points) == 0:
+            continue
         tube = _tube_mesh(list(surface_points), radius)
         signed_distance = _signed_distance_to_body(body, tube.vertices)
         min_signed = float(signed_distance.min())
@@ -584,12 +644,11 @@ def grip_ring_margin(
     x=0(起点)以外の点では、押し込み方向を常にz軸とみなす近似を使う
     (front_surface_z_at_offsetと同様、中心から離れるほど実際の局所法線
     方向とのズレが増えるが、_GRIP_RING_TOLERANCEと同じ精神で許容する)。
-    区間の方向(arm_heading/arm_turn_2..4)が-y軸から大きく離れる(90度に
-    近づく)ほど、リングの実際の断面(進行方向に垂直)とこの近似(常に
-    x-z平面内)のズレも大きくなり、より保守的(=実際は問題なくても違反と
-    判定しやすい)側に働く。誤って安全な形状を弾く可能性はあるが、危険な
-    形状を見逃す方向には働かないため、GAの探索を過度に狭めるようであれば
-    見直す(現状は許容範囲として様子見)。
+    アームは固定形状(_ARM_HEADING=20度)のため、この近似の前提(-y軸に
+    近い方向への移動)が大きく崩れることはない(以前、曲げを探索変数に
+    していた際、この前提を超えて大きく曲がる経路でgrip_depth_margin/
+    grip_ring_marginが実際の埋没を見逃す不具合が見つかったため、曲げの
+    自由度はconnector_pointsへ委譲した。モジュールdocstring参照)。
     """
     radius = frame.arm_thickness / 2
     theta = np.linspace(-np.pi, np.pi, _GRIP_RING_SAMPLES, endpoint=False)
@@ -634,7 +693,7 @@ def build_frame_pair(
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
     """左右のフレーム(アーム+コネクタの1本の連続したチューブ)を構築する(着色済み)。"""
     validate_target_reach(plug, params)
-    validate_anchor_height(frame, params)
+    validate_anchor_height(params)
     body = build_nose_body(params)
     sides = [build_side_paths(frame, plug, params, side) for side in (-1, 1)]
     validate_grip_depth(frame, params, sides)

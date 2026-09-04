@@ -257,7 +257,7 @@ def front_surface_z_at_offset(params: NoseParams, y: float, x: float) -> float:
 
     half_width/depth_backはsurface_profileの代わりにsurface_profile_atを
     使う(鼻先の丸め区間(y<0)でも正しい値を得るため。models.frame_model.
-    arm_pointsの経路がanchor_yより鼻先側(y<0)まで伸びる場合がある)。
+    connector_pointsの経路が鼻先側(y<0)まで伸びる場合がある)。
     """
     half_width, depth_back, _ = surface_profile_at(params, y)
     center_z = front_surface_z_at_center(params, y)
@@ -370,10 +370,9 @@ def surface_profile_at(params: NoseParams, y: float) -> tuple[float, float, floa
     前面迫り出しはtip_cap_depth_front、半幅はtip_cap_half_width、背面奥行きは
     _BACK_DEPTH(この区間は鼻根から十分離れており_root_waist_depth_bumpの
     影響を受けないため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
-    front_surface_z_at_center/front_surface_z_at_offsetが、鼻先近くまで
-    アームを伸ばす場合(models.frame_model.arm_pointsの経路がanchor_yより
-    鼻先側(y<0)まで伸びる場合)や、コネクタが鼻先を越えて鼻栓へ向かう
-    場合に、正しい表面位置を得るために使う。
+    front_surface_z_at_center/front_surface_z_at_offsetが、コネクタ
+    (models.frame_model.connector_points)が鼻先付近を通ったり、鼻先を
+    越えて鼻栓へ向かったりする場合に、正しい表面位置を得るために使う。
     """
     if y >= 0:
         return surface_profile(params, y)

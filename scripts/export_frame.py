@@ -1,4 +1,4 @@
-"""NSGA-IIの候補(FrameParamsの12変数)を鼻モデルと組み合わせてglTF(.glb)に出力するスクリプト。
+"""NSGA-IIの候補(FrameParamsの11変数)を鼻モデルと組み合わせてglTF(.glb)に出力するスクリプト。
 
 FrameParamsの各フィールドに対応するCLI引数で候補フレームを指定する。省略すると既定
 形状になる。export_model.pyが出力するoutput/base.glb(常に既定形状)とは
