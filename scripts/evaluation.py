@@ -31,14 +31,22 @@ v2はfit_gap/smoothness/proportion_penaltyを「意匠性」という1軸のサ�
     (PROJECT.md参照)。現状のFrameScoreはこれらも生の値のまま返し、
     閾値判定(制約違反への変換)は呼び出し側(将来のGA連携層)に委ねる
 
-## retentionにclip_angleを含めない理由
+## retentionにclip_angleを直接の乗数として含めない理由
 
 サブエージェントによるレビューでは「clip_angleも保持力に寄与するはず」と
 指摘されたが、実際のジオメトリ(frame_model.arm_points)を確認すると、
 左右のアームは起点(x=0、clip_angleに依らず常に同じ点)から生えており、
 clip_angleは起点から離れた後の開き方(左右への広がり方)にしか影響しない。
 実物のバネ式クリップのように、起点そのものの角度が挟み込む力を生む
-構造にはなっていないため、retentionの代理指標には含めなかった。
+構造にはなっていないため、clip_angleをretentionの直接の乗数には含めない。
+
+ただしこの判断は「clip_angleがretentionに一切影響してはいけない」という
+意味ではない。後に、アームの実長(3D経路長)を接触面積の代理指標として使う
+よう修正した(下記「retentionのarm_lengthを実際の経路長に置き換えた理由」
+参照)ため、clip_angleを大きくして鼻翼側へ開くほど実長が伸び、間接的に
+retentionへ寄与するようになった。これは「起点の角度が挟み込む力を生む」
+という物理モデルとは別物で、「接触区間が長くなる」という接触面積の観点
+からの寄与であり、上記の判断そのものとは矛盾しない。
 
 ## retentionのarm_thicknessをplug.diameterで頭打ちにする理由
 
@@ -77,6 +85,25 @@ arm_length(接触区間の長さ)を掛けるようにした(メガネのアー�
 評価しないためGAの探索でarm_lengthが下限に張り付いていた既知の限界
 (PROJECT.md参照)も同時に解消され、実際にNSGA-IIを動かすとarm_lengthが
 トレードオフとして分布するようになったことを確認した。
+
+## retentionのarm_lengthを実際の経路長に置き換えた理由(issue #1)
+
+上記の修正でretentionはframe.arm_length(yの区間幅)に比例するようになった
+が、これはclip_angleに依らず一定の値だった。実際にNSGA-IIを実行すると、
+パレート最適候補のほとんどでclip_angleが1〜6度程度と小さいままで、
+アームがほぼ鼻中隔の真上(x≈0)に留まり、鼻翼(nostril_gap/2〜tip_w/2付近)
+まで横に開いていく候補をGAが選ばなかった。clip_angleを大きくしてもretention
+が一切増えないため、GAにとって鼻翼側まで開く理由がなかったため。
+
+「起点の角度自体は挟み込む力を生まない」という判断(上記「retentionに
+clip_angleを直接の乗数として含めない理由」参照)は変えず、frame.arm_length
+の代わりにarm_pointsの実際の3D経路長(x方向の広がりも含む点列のユークリッド
+距離の合計)を使うよう修正した。clip_angleを大きくすると経路がx方向にも
+伸びる分だけ実際の接触区間が長くなるため、この経路長を使えば「起点の角度」
+という物理モデルを持ち出さずに、接触面積の観点から自然にclip_angleの寄与を
+反映できる。_MAX_CLIP_ANGLE(60度)の範囲では経路長は最大でも
+arm_length/cos(60°)=arm_length×2程度に収まるため、青天井に伸ばせる抜け穴には
+ならない。
 
 ## holder_size_penaltyを廃止した理由(保持部の球の廃止)
 
@@ -128,18 +155,40 @@ _MIN_THICKNESS_RATIO = 0.03
 _MAX_THICKNESS_TO_PLUG_DIAMETER = 1.0
 
 
-def _retention(frame: FrameParams, plug: PlugParams) -> float:
+def _path_length(points: list[np.ndarray]) -> float:
+    """点列を順に結んだ折れ線の全長(隣接点間のユークリッド距離の合計)を返す。
+
+    _retention(アームの実長)・_proportion_penalty(全長)の両方が、対象と
+    なる点列が異なるだけで同じ計算をしていたため共通化した。
+    """
+    return sum(
+        float(np.linalg.norm(points[i + 1] - points[i])) for i in range(len(points) - 1)
+    )
+
+
+def _retention(frame: FrameParams, plug: PlugParams, arm_points: list[np.ndarray]) -> float:
     """保持力(機能性、最大化)。grip_depth(めり込み量)×arm_thickness(剛性)×
-    arm_length(接触区間の長さ)。アーム全体がgrip_depthで鼻表面に沿う
+    アームの実長(接触区間の3D経路長)。アーム全体がgrip_depthで鼻表面に沿う
     (models.frame_model.arm_points参照)ため、接触面積の代理指標として
-    arm_lengthも乗じる(メガネのアームが長く沿うほど落ちにくいのと同じ
-    発想)。arm_thicknessの寄与はplug.diameterで頭打ちにする(理由はモジュール
-    docstring参照)。clip_angleを含めない理由も同docstring参照。
+    実長も乗じる(メガネのアームが長く沿うほど落ちにくいのと同じ発想)。
+    arm_thicknessの寄与はplug.diameterで頭打ちにする(理由はモジュール
+    docstring参照)。
+
+    以前はframe.arm_length(yの区間幅)をそのまま使っていたが、これは
+    clip_angleに依らず一定のため、実際にはclip_angleを大きくして鼻翼側へ
+    開いてもretentionが一切増えず、GAがclip_angleを広げる理由がなかった
+    (issue #1)。arm_points(x, y, z)の実際の3D経路長(x方向の広がりも含む)
+    に置き換えることで、鼻翼側まで開くほど接触区間が実際に長くなる分を
+    自然に反映するようにした。「起点自体の角度は挟み込む力を生まない」
+    という判断(モジュールdocstring「retentionにclip_angleを直接の乗数として
+    含めない理由」参照)は変えていない(依然としてclip_angleを直接の乗数には
+    していない)。左右のアームはclip_angleによりxの符号が反転するだけで実長は
+    等しいため、片側(呼び出し側が渡すarm_points)だけで十分。
     """
     effective_thickness = min(
         frame.arm_thickness, plug.diameter * _MAX_THICKNESS_TO_PLUG_DIAMETER
     )
-    return frame.grip_depth * effective_thickness * frame.arm_length
+    return frame.grip_depth * effective_thickness * _path_length(arm_points)
 
 
 def _pain(frame: FrameParams) -> float:
@@ -245,10 +294,7 @@ def _proportion_penalty(
     penalties = []
     for points, path in sides:
         full_path = full_path_points(points, path)
-        length = sum(
-            float(np.linalg.norm(full_path[i + 1] - full_path[i]))
-            for i in range(len(full_path) - 1)
-        )
+        length = _path_length(full_path)
         ratio = arm_thickness / length
         too_thin = max(0.0, _MIN_THICKNESS_RATIO - ratio)
         too_thick = max(0.0, arm_thickness - max_thickness)
@@ -360,7 +406,7 @@ def evaluate_frame(
     fit_gap, fit_gap_max = _fit_gap(sides, body, frame.arm_thickness)
 
     return FrameScore(
-        retention=_retention(frame, plug),
+        retention=_retention(frame, plug, sides[0][0]),
         pain=_pain(frame),
         fit_gap=fit_gap,
         reach_gap=_reach_gap(sides, targets),
