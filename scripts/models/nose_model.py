@@ -83,7 +83,7 @@ _NOSTRIL_Z_RATIO = 0.5
 
 @dataclass(frozen=True)
 class NoseParams:
-    """鼻モデルの寸法パラメータ(単位: mm)。
+    """鼻モデルの寸法パラメータ(単位: mmおよび度。nostril_tilt_degのみ度)。
 
     構築後の変更を禁止する(frozen)ことで、__post_init__の検証を
     後からのミューテーションで回避できないようにしている。
@@ -364,6 +364,58 @@ def surface_profile(params: NoseParams, y: float) -> tuple[float, float, float]:
     depth_back = _BACK_DEPTH - _root_waist_depth_bump(y, params.nose_len)
 
     return half_w, depth_back, depth_front
+
+
+def _z_at_center(region: np.ndarray) -> float:
+    """2D点列(region[:,0]がx, region[:,1]がz)のうち、x=0に最も近い点のzを返す。
+
+    back_surface_z_at_center/front_surface_z_at_centerの共通ロジック
+    (リングを対象の弧だけに絞り込んだあと、x=0に最も近い点を探す部分)。
+    """
+    idx = np.argmin(np.abs(region[:, 0]))
+    return float(region[idx, 1])
+
+
+def back_surface_z_at_center(params: NoseParams, y: float) -> float:
+    """指定したyにおける、背面境界のx=0(中央)での実際のz座標を返す。
+
+    断面の背面2角を結ぶ辺は直線ではなく、中央(x=0)が+z方向へ膨らむ
+    ブーメラン型のカーブ(_boomerang_bow)になっている。そのため単純に
+    -depth_backを「背面の位置」として使うと、実際より後方(奥)に安全域を
+    見積もってしまう。frame_model.validate_grip_depthが、常にx=0にある
+    アーム起点が鼻の背面を突き抜けていないか正しく検証するために使う
+    (ブーメラン計算式を再実装せず、実際の断面リング上でx=0に最も近い
+    点のzを使うことで、_rounded_triangle_ringの実装から乖離しないようにする)。
+
+    _rounded_triangle_ringが返すリングは[背面左角の弧, ブーメラン, 背面右角の
+    弧, 前面角の弧]の順に連結されている(_rounded_triangle_ring参照)。x=0に
+    近い点を探す範囲を先頭3ブロック(背面側、末尾の前面角の弧を除く)に
+    限定することで、前面角の弧の点を誤って拾わないようにしている。
+    """
+    half_width, depth_back, depth_front = surface_profile(params, y)
+    ring = _rounded_triangle_ring(half_width, depth_back, depth_front)
+    return _z_at_center(ring[:-_POINTS_PER_CORNER])
+
+
+def front_surface_z_at_center(params: NoseParams, y: float) -> float:
+    """指定したyにおける、前面境界のx=0(中央)での実際のz座標を返す。
+
+    surface_profileが返すdepth_frontは、角丸処理前の三角形の頂点(鋭角の
+    コーナー)のz座標であり、実際のメッシュはこの頂点を半径
+    half_width*_CORNER_ROUNDNESS_RATIOでフィレットしているため、実際の
+    前面境界(x=0)はdepth_frontより後退している(既定値でy=6mm付近で
+    約1.66mm)。frame_model.arm_pointsのアーム起点(grip_depthでめり込ませる
+    基準点)は、この後退を無視するとdepth_frontを基準にした分だけ実際には
+    鼻表面に届かず、意図した「鼻中隔を挟み込む」挙動が機能しなくなる。
+
+    _rounded_triangle_ringのリングの末尾_POINTS_PER_CORNER点が前面角の
+    フィレット弧にあたる(_rounded_triangle_ring参照)。back_surface_z_at_
+    centerと同様、リング全体でx=0に近い点を探すと稀に背面のブーメラン
+    カーブ側の点を誤って拾うことがあるため、前面角の弧だけに限定する。
+    """
+    half_width, depth_back, depth_front = surface_profile(params, y)
+    ring = _rounded_triangle_ring(half_width, depth_back, depth_front)
+    return _z_at_center(ring[-_POINTS_PER_CORNER:])
 
 
 def _ring_at(params: NoseParams, k: int) -> np.ndarray:
