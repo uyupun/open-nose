@@ -66,12 +66,12 @@ import trimesh
 from models.frame_model import (
     FrameParams,
     SidePaths,
+    arm_clearance_margin,
     build_side_paths,
+    grip_depth_margin,
+    grip_ring_margin,
     surface_following_points,
     validate_anchor_height,
-    validate_arm_clearance,
-    validate_grip_depth,
-    validate_grip_ring,
     validate_target_reach,
 )
 from models.nose_model import NoseParams, build_nose_body
@@ -201,39 +201,52 @@ def _proportion_penalty(
 
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約4つ。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約7つ。モジュールdocstring参照)。
 
     目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
-    retentionのみ最大化、他は最小化。制約(reach_gap以下の4項目)は
+    retentionのみ最大化、他は最小化。制約(reach_gap以下の7項目)は
     実行不可能個体を除外するための値で、いずれも0または一定値以下で
     あるべき(わざと悪化させて選ぶ理由がない)。実際の閾値判定は
     未実装で、生の値のまま返す(モジュールdocstring参照)。
+
+    grip_depth_margin/arm_clearance_margin/grip_ring_marginは、
+    frame_model.pyのvalidate_*(build_frame_pairが使う、例外を送出する版)
+    と対になる制約値。frameの探索によって結果が変わる検証なので、
+    evaluate_frameは例外で止めずこれらを制約として返す(モジュール
+    docstring・frame_model.pyのモジュールdocstring参照)。
     """
 
     # 目的(3つ)
     retention: float  # 機能性(最大化)
     pain: float  # 快適さ(最小化)
     fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
-    # 制約(4つ。すべて0または一定値以下であるべき)
+    # 制約(7つ。すべて0または一定値以下であるべき)
     reach_gap: float  # 保持部が鼻栓の露出端に届いているか(0であるべき)
     fit_gap_max: float  # 局所的な浮きの最悪点(閾値未定)
     smoothness: float  # 経路の折れの急峻さ(閾値未定)
     proportion_penalty: float  # 太さの破綻(0であるべき)
+    grip_depth_margin: float  # 起点が鼻の厚みを超えていないか(0以下であるべき)
+    arm_clearance_margin: float  # 表面沿い区間のめり込み量(0以下であるべき)
+    grip_ring_margin: float  # 起点断面の側方への突き出し量(0以下であるべき)
 
 
 def evaluate_frame(
     frame: FrameParams, plug: PlugParams, params: NoseParams
 ) -> FrameScore:
-    """FrameParams から機能性・快適さ・意匠性の評価値を計算する。"""
+    """FrameParams から機能性・快適さ・意匠性の評価値を計算する。
+
+    frameに依存しない検証(validate_target_reach, validate_anchor_height。
+    PlugParams/NoseParamsにしか依存せず、GAの探索中は結果が変わらない)は
+    例外で即座に止める。frameに依存する検証(grip_depth_margin等)は
+    例外で止めず、制約値としてFrameScoreに含める(frame_model.pyの
+    モジュールdocstring参照)。
+    """
     validate_target_reach(plug, params)
-    validate_grip_depth(frame, params)
     validate_anchor_height(params)
     body = build_nose_body(params)
     sides: list[SidePaths] = [
         build_side_paths(frame, plug, params, side) for side in (-1, 1)
     ]
-    validate_arm_clearance(sides, body, frame.arm_thickness)
-    validate_grip_ring(frame, params, body)
 
     targets = [
         plug_outer_end(plug, params.nostril_gap, params.tip_depth_front, side)
@@ -252,4 +265,7 @@ def evaluate_frame(
         proportion_penalty=_proportion_penalty(
             sides, frame.arm_thickness, max_thickness
         ),
+        grip_depth_margin=grip_depth_margin(frame, params),
+        arm_clearance_margin=arm_clearance_margin(sides, body, frame.arm_thickness),
+        grip_ring_margin=grip_ring_margin(frame, params, body),
     )
