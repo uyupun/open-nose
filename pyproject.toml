@@ -5,8 +5,10 @@ description = "Add your description here"
 requires-python = ">=3.14"
 dependencies = [
     "manifold3d>=3.5.2",
+    "matplotlib>=3.10.0",
     "numpy>=2.5.2",
     "pyglet<2",
+    "pymoo>=0.6.1.5",
     "rtree>=1.4.1",
     "scipy>=1.18.1",
     "trimesh>=5.1.0",
