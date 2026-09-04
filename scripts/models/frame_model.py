@@ -1,9 +1,14 @@
-"""フレームの仮形状(PROJECT.md の「フレームの設計変数(暫定4変数)」に対応)。
+"""フレームの仮形状(PROJECT.md の「フレームの設計変数(暫定5変数)」に対応)。
 
 メガネのように鼻筋(鼻の付け根)まで伸ばす必要はなく、実物の鼻クリップ
 (水泳用など)のように鼻先まわりだけで完結する小さなクリップとして表現する。
 鼻中隔の上あたりを起点に、鼻の前面より外側を保ちながら鼻栓の露出端まで
 伸びるプレースホルダー(円柱の連結)にしている(_build_arm, _build_holder参照)。
+
+起点(鼻中隔上の1点)だけは例外で、grip_depth分だけ意図的に鼻表面へ
+めり込ませている。実際の鼻クリップが鼻中隔を軽く挟み込んで保持力を得る
+挙動の、変形計算なしの幾何的な近似(PROJECT.md「鼻の弾力(変形)は扱わない」
+補足を参照)。起点以外は従来通り非接触を保つ。
 """
 
 from dataclasses import dataclass
@@ -46,6 +51,7 @@ class FrameParams:
     arm_length: float = 6.0
     arm_thickness: float = 2.0
     holder_offset: float = 12.0
+    grip_depth: float = 0.5
 
     def __post_init__(self) -> None:
         for name in ("arm_length", "arm_thickness"):
@@ -58,6 +64,8 @@ class FrameParams:
             )
         if self.holder_offset < 0:
             raise ValueError(f"holder_offset は0以上にすること: {self.holder_offset}")
+        if self.grip_depth < 0:
+            raise ValueError(f"grip_depth は0以上にすること: {self.grip_depth}")
 
 
 def _depth_front_at(params: NoseParams, y: float) -> float:
@@ -73,11 +81,14 @@ def _depth_front_at(params: NoseParams, y: float) -> float:
 def _build_arm(
     frame: FrameParams, params: NoseParams, side: Literal[-1, 1]
 ) -> tuple[trimesh.Trimesh, np.ndarray]:
-    """鼻中隔の上あたり(前面表面のすぐ外)を起点に、clip_angleで開きながら
-    鼻先方向へarm_length伸びる1本のアーム(複数区間の折れ線)を返す。
+    """鼻中隔の上あたり(起点)を起点に、clip_angleで開きながら鼻先方向へ
+    arm_length伸びる1本のアーム(複数区間の折れ線)を返す。
 
-    起点・経路とも、その時点のyにおける前面迫り出し(surface_profileの
-    depth_front)より確実に外側(z方向)を保つことで、鼻の内部を貫通しない
+    起点(最初の点)だけは例外で、grip_depthの分だけ前面迫り出し
+    (surface_profileのdepth_front)より内側(z方向)にめり込ませ、
+    実際の鼻クリップが鼻中隔を挟み込んで保持力を得る挙動を近似する
+    (frame_model.pyのモジュールdocstring参照)。それ以外の経路は従来通り、
+    その時点のdepth_frontより確実に外側を保つことで鼻の内部を貫通しない
     ようにしている(depth_front(y)はそのyの断面が取りうる最大のzなので、
     zがそれを上回っている限りxがどの値でも外側にいることが保証される)。
     xは起点(鼻中隔中央、x=0)からclip_angleに応じて左右に開いていく
@@ -87,9 +98,12 @@ def _build_arm(
     ys = np.linspace(_ARM_ANCHOR_Y, _ARM_ANCHOR_Y - frame.arm_length, _ARM_SAMPLES)
 
     points = []
-    for y in ys:
+    for i, y in enumerate(ys):
         _, _, depth_front = surface_profile(params, y)
-        z = depth_front + _SURFACE_CLEARANCE
+        if i == 0:
+            z = depth_front - frame.grip_depth
+        else:
+            z = depth_front + _SURFACE_CLEARANCE
         x = side * np.tan(np.radians(frame.clip_angle)) * (_ARM_ANCHOR_Y - y)
         points.append([x, y, z])
 
