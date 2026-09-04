@@ -226,12 +226,55 @@ class FrameScore:
     fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
     # 制約(7つ。すべて0または一定値以下であるべき)
     reach_gap: float  # 保持部が鼻栓の露出端に届いているか(0であるべき)
-    fit_gap_max: float  # 局所的な浮きの最悪点(閾値未定)
-    smoothness: float  # 経路の折れの急峻さ(閾値未定)
+    fit_gap_max: float  # 局所的な浮きの最悪点(閾値: _FIT_GAP_MAX_THRESHOLD)
+    smoothness: float  # 経路の折れの急峻さ(閾値: _SMOOTHNESS_THRESHOLD_DEG)
     proportion_penalty: float  # 太さの破綻(0であるべき)
     grip_depth_margin: float  # 起点が鼻の厚みを超えていないか(0以下であるべき)
     arm_clearance_margin: float  # 表面沿い区間のめり込み量(0以下であるべき)
     grip_ring_margin: float  # 起点断面の側方への突き出し量(0以下であるべき)
+
+
+# 制約の閾値。7項目のうち5項目(reach_gap/proportion_penalty/
+# grip_depth_margin/arm_clearance_margin/grip_ring_margin)は0以下が
+# 合格ラインになるよう既に設計されているため、判断が必要な実質的な閾値は
+# fit_gap_max・smoothnessの2つだけ。いずれも仮置きで、NSGA-IIを実際に
+# 動かし、生成される候補フレームを見ながら見直す前提
+
+# 0以下が合格ラインの制約に共通で使う、浮動小数点誤差を吸収するための
+# ごく小さな余裕(mm、または比率)。境界ぎりぎりの計算結果が誤差でわずかに
+# 正になっても誤って棄却しないようにする
+_MARGIN_EPSILON = 1e-6
+
+# fit_gap_maxの許容値(mm)。鼻栓自体の直径(plug.diameterの既定値6.0mm)を
+# 「これ以上局所的に離れていたら明らかに顔から浮いて見える」の目安にする
+# (フレームが挟んでいる相手=鼻栓より大きく浮くのは不自然、という考え方。
+# retentionのarm_thickness頭打ちと同じ発想)。デフォルト設定の実測値
+# (約3.19mm)はこの半分程度で収まる
+_FIT_GAP_MAX_THRESHOLD = 6.0
+
+# smoothnessの許容値(度)。180度(完全な折り返し)は明らかに破綻した形なので、
+# その手前で「一続きの滑らかな形状」とみなせる範囲を120度とする(直角
+# (90度)を超える曲がりもまだ意図的な形として許容し、それ以上を
+# 「ジグザグ」とみなす)。デフォルト設定の実測値(約64度)は十分収まる
+_SMOOTHNESS_THRESHOLD_DEG = 120.0
+
+
+def constraint_values(score: FrameScore) -> tuple[float, ...]:
+    """FrameScoreの7つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    実行可能、正=違反量)に変換したタプルを返す。
+
+    すでに0以下が合格ラインの5項目は_MARGIN_EPSILONを引くだけ(境界の
+    誤差吸収)。fit_gap_max・smoothnessは実際の閾値を引く。
+    """
+    return (
+        score.reach_gap - _MARGIN_EPSILON,
+        score.fit_gap_max - _FIT_GAP_MAX_THRESHOLD,
+        score.smoothness - _SMOOTHNESS_THRESHOLD_DEG,
+        score.proportion_penalty - _MARGIN_EPSILON,
+        score.grip_depth_margin - _MARGIN_EPSILON,
+        score.arm_clearance_margin - _MARGIN_EPSILON,
+        score.grip_ring_margin - _MARGIN_EPSILON,
+    )
 
 
 def evaluate_frame(
