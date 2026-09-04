@@ -24,10 +24,24 @@ class PlugParams:
 
     既製品を使う想定のプレースホルダーで、円柱として単純化している。
     後から実際の製品寸法に合わせて調整する。
+
+    lengthは、鼻栓プレースホルダーとしての寸法だけでなく、露出端
+    (plug_outer_end、frame_model.connector_pointsのダイブ区間の目標点)を
+    鼻本体メッシュの範囲(tip_cap_min_y)からどれだけ引き離すかも兼ねている。
+    露出端のyは_PLUG_Y_OFFSET - length/2で決まり、これが鼻本体メッシュの
+    範囲から近すぎると、ダイブ区間のチューブ(半径arm_thickness/2)の
+    終端キャップが実際にメッシュへ食い込む(ダイブの向きが鼻表面沿いの
+    高さから鼻栓の実際の深さへ大きく下がる必要があるため、常にy軸に
+    対して斜めになり、キャップがy方向に半径分近く広がるため)。既定値
+    (8.0mm)では余裕が0.25mmしかなく、arm_thickness=0.5mm(探索範囲の
+    下限)を超えるとほぼ確実に違反していたため、12.0mmに引き上げて
+    余裕を約2.25mmに拡大した。実測ではarm_thickness=4.4mm程度までは
+    安全(探索範囲の上限8.0mmまでは余裕でカバーできていない)。他の閾値と
+    同様、暫定値でGAを実際に動かしながら見直す前提。
     """
 
     diameter: float = 6.0
-    length: float = 8.0
+    length: float = 12.0
 
     def __post_init__(self) -> None:
         for name in ("diameter", "length"):

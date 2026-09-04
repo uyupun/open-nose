@@ -142,6 +142,11 @@ _GRIP_RING_TOLERANCE = 0.15
 # _polyline_mesh(trimesh.creation.cylinderの既定sections=32)と同等の
 # 滑らかさを保つ
 _TUBE_POLYGON_RESOLUTION = 8
+# _signed_distance_to_bodyが疑似法線による符号判定を信頼する距離の上限
+# (mm)。これを超える点は低速だが距離に依存せず正確なbody.contains()で
+# 符号を求め直す(同関数のdocstring参照)。実測で4.5mm離れた点の符号が
+# 反転する例が見つかったため、余裕を持って2.0mmに設定した
+_PSEUDO_NORMAL_MAX_DISTANCE = 2.0
 
 # 片側のアーム経路・コネクタ経路の点列のペア(points, path)。
 # build_side_pathsが返し、validate_arm_clearance・build_frame_pair・
@@ -365,25 +370,25 @@ def surface_following_points(path: list[np.ndarray]) -> np.ndarray:
     で意図的にまだ(部分的に)埋め込まれた状態のため同様に対象外。移動距離は
     pathの隣接する点同士のxy平面距離を累積して求める(connector_points側で
     実際に使った値と、生成に使った(x, y)がそのまま点として残っているため
-    一致する)。コネクタ最終点(path[-1])は鼻栓へ意図的に離れていくダイブ
-    区間の到達点なので除外する。path[0]はarm_end(=arm_pointsの最終点)と
-    同じ点のため、重複しないよう候補からは除く。
+    一致する)。path[0]はarm_end(=arm_pointsの最終点)と同じ点のため、
+    重複しないよう候補からは除く。
 
-    (既知の限界: path[-1]を除外しているのは「targetのyが鼻本体メッシュの
-    y範囲より外側にある(validate_target_reach)ため安全」という前提による
-    ものだが、これは中心線だけの議論で、実際のチューブの半径
-    (arm_thickness/2)を考慮していない。ダイブの向きがy軸に対して斜めだと
-    チューブの終端キャップがy方向に半径分近く広がり、targetのyがメッシュ
-    境界から半径未満しか離れていない場合はキャップの一部が実際にメッシュへ
-    食い込むことを実測で確認している。詳細はissue参照)
+    コネクタ最終点(path[-1]、鼻栓へ向けたダイブ区間の到達点)は含める。
+    「targetのyが鼻本体メッシュのy範囲より外側にある(validate_target_reach)
+    ため安全」という前提は中心線だけの話で、実際のチューブには半径
+    (arm_thickness/2)があり、ダイブの向きがy軸に対して斜めだとチューブの
+    終端キャップがy方向に半径分近く広がる。plug.length(PlugParamsの
+    docstring参照)が、targetのyを鼻本体メッシュの範囲から十分引き離す
+    役割も兼ねており、その前提のもとでこの点もcenterlineだけでなく
+    チューブ表面まで実際の符号付き距離で検証している。
 
     evaluation.pyのfit_gap、およびarm_clearance_marginの両方から参照される。
     """
     xy = np.array([p[:2] for p in path])
     step_distance = np.linalg.norm(np.diff(xy, axis=0), axis=1)
     traveled = np.cumsum(step_distance)  # traveled[i]はpath[0]からpath[i+1]までの距離
-    candidates = np.array(path[1:-1])
-    past_transition = traveled[:-1] >= _STANDOFF_TRANSITION_DISTANCE
+    candidates = np.array(path[1:])
+    past_transition = traveled >= _STANDOFF_TRANSITION_DISTANCE
     return candidates[past_transition]
 
 
@@ -412,8 +417,26 @@ def _signed_distance_to_body(
     「表面のすぐ近くにいる(安全)」と「わずかにめり込んでいる(危険)」を
     区別できない。最近接点の三角形の法線と、その点から問い合わせ点への
     向きの内積の符号を使って外側/内側を判定する(疑似法線による符号付き
-    距離。body.contains()のような別のアルゴリズムに切り替えるのではなく、
-    この判定方法自体は複数回のレビューで正しさを確認済みのため維持する)。
+    距離。この判定方法自体は複数回のレビューで正しさを確認済みのため維持する)。
+
+    ただしこの疑似法線による符号判定は、問い合わせ点が表面のごく近くに
+    ある前提でのみ信頼できる。問い合わせ点が表面から離れている場合、
+    最近接点の三角形の法線が実際の内外を表さないことがあり、符号が反転
+    した誤った値(符号なし距離としては正しいが、内外の判定が逆)を返す
+    ことを実測で確認した(connector_pointsのダイブ到達点付近、
+    arm_thicknessを大きくした際に発覚。実際には表面から4.5mm以上離れて
+    いる点が、符号付き距離では-4.5mm(重度のめり込み)と誤って報告されて
+    いた)。そのため、距離が_PSEUDO_NORMAL_MAX_DISTANCEを超える点だけは
+    body.contains()(レイキャストベースの厳密な内外判定。疑似法線と違い
+    距離に依存せず正確だが、点ごとにレイを飛ばすため低速)で符号を求め
+    直す。呼び出し元(arm_clearance_margin等)が対象とする点は大半が
+    表面近くにあるため、低速なcontains()を使うのは例外的な少数の点に
+    限られる。ただしarm_thicknessが大きい(=チューブの半径が大きく、
+    ダイブ到達点のキャップが表面から離れやすい)個体ではcontains()を
+    使う点が増え、evaluate_frameの1回あたりの所要時間が約66ms→94〜120ms
+    に増加することを実測で確認している(GA全体の実行時間はpop_size×
+    n_gen×この値で決まるため、探索範囲の上限付近を多く含む世代では
+    既定の所要時間(約5分)より伸びうる)。
 
     closest_point(rtreeによる空間索引を使う高速版)を使う。総当たりの
     closest_point_naiveは、evaluate_frameを繰り返し呼び出す用途(GA)では
@@ -425,6 +448,12 @@ def _signed_distance_to_body(
     normals = body.face_normals[triangle_id]
     direction = points - closest
     sign = np.sign(np.einsum("ij,ij->i", direction, normals))
+
+    far = distance > _PSEUDO_NORMAL_MAX_DISTANCE
+    if np.any(far):
+        inside = body.contains(points[far])
+        sign[far] = np.where(inside, -1.0, 1.0)
+
     return distance * sign
 
 
@@ -432,9 +461,12 @@ def validate_target_reach(plug: PlugParams, params: NoseParams) -> None:
     """鼻栓の露出端(connector_pointsの目標)が鼻本体メッシュのy方向の範囲
     より外側にあることを検証する。
 
-    connector_pointsの最終区間(approach→path[-1])が鼻を貫通しない安全性は、
-    targetのyが鼻本体メッシュのy範囲より外側にあることに依存している。
-    PlugParams/NoseParamsの組み合わせによってはこの前提が崩れうるため、
+    ここで検証するのは中心線(target)がメッシュのy範囲の外側にあるという
+    粗い前提だけで、問題設定そのものが破綻していないかの確認にとどまる
+    (PlugParams/NoseParamsの組み合わせによってはこの前提自体が崩れうる)。
+    実際のチューブ表面(半径arm_thickness/2を持つダイブ区間)がメッシュに
+    めり込まないかは、frameに依存する検証としてarm_clearance_margin
+    (surface_following_pointsがpath[-1]も対象に含める)側が別途担う。
     build_frame_pair(メッシュ生成)・evaluate_frame(評価)の両方から
     共通で呼び出して検証する。
     """
@@ -566,15 +598,17 @@ def arm_clearance_margin(
     この関数自体の近似度は変えていない。
 
     コネクタの区間長の合計が_STANDOFF_TRANSITION_DISTANCE未満の場合、
-    surface_following_pointsが空配列を返しうる(遷移が完了する前に経路が
-    終わるため)。その場合はそちら側の表面沿い区間そのものが存在しない
-    ということなので、そちら側の判定はスキップする(worstに寄与させない)。
+    surface_following_pointsが返す点が2点未満(0点、または遷移完了直後の
+    1点だけ)になりうる(遷移が完了する前に経路が終わるため)。_tube_mesh
+    (sweep_polygon)は2点以上ないと経路の方向を定義できずエラーになる
+    ため、その場合はそちら側の表面沿い区間そのものが存在しないとみなし、
+    判定をスキップする(worstに寄与させない)。
     """
     radius = arm_thickness / 2
     worst = -np.inf
     for _, path in sides:
         surface_points = surface_following_points(path)
-        if len(surface_points) == 0:
+        if len(surface_points) < 2:
             continue
         tube = _tube_mesh(list(surface_points), radius)
         signed_distance = _signed_distance_to_body(body, tube.vertices)
