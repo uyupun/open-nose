@@ -250,14 +250,14 @@ def front_surface_z_at_offset(params: NoseParams, y: float, x: float) -> float:
     反映しておらず、models.frame_model.arm_pointsがアーム全体をこの値から
     grip_depthだけ埋め込む用途で使うと、その分だけ埋め込みが浅くなり
     (実際の表面より外側に留まり)、grip_ring_marginが誤って違反を検出する
-    不具合があった(clip_angleが小さいほどxが0に近く、この誤差の影響が
-    大きい)。front_surface_z_at_centerを起点にすることで、x=0での連続性を
-    保証しつつ、xが大きくなるにつれて丸め処理前の背面角(こちらはフィレットの
+    不具合があった(xが0に近いアームほど、この誤差の影響が大きい)。
+    front_surface_z_at_centerを起点にすることで、x=0での連続性を保証
+    しつつ、xが大きくなるにつれて丸め処理前の背面角(こちらはフィレットの
     影響が相対的に小さい遠方の近似として許容)へ近づく形にした。
 
     half_width/depth_backはsurface_profileの代わりにsurface_profile_atを
-    使う(鼻先の丸め区間(y<0)でも正しい値を得るため。arm_length>
-    _ARM_ANCHOR_Yのとき、アームの下端側はy<0に入りうる)。
+    使う(鼻先の丸め区間(y<0)でも正しい値を得るため。models.frame_model.
+    arm_pointsの経路がanchor_yより鼻先側(y<0)まで伸びる場合がある)。
     """
     half_width, depth_back, _ = surface_profile_at(params, y)
     center_z = front_surface_z_at_center(params, y)
@@ -370,9 +370,10 @@ def surface_profile_at(params: NoseParams, y: float) -> tuple[float, float, floa
     前面迫り出しはtip_cap_depth_front、半幅はtip_cap_half_width、背面奥行きは
     _BACK_DEPTH(この区間は鼻根から十分離れており_root_waist_depth_bumpの
     影響を受けないため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
-    front_surface_z_at_center/front_surface_z_at_offsetが、鼻先近くまでアームを
-    伸ばす(models.frame_model.arm_pointsのarm_length>_ARM_ANCHOR_Yの場合)や、
-    コネクタが鼻先を越えて鼻栓へ向かう場合に、正しい表面位置を得るために使う。
+    front_surface_z_at_center/front_surface_z_at_offsetが、鼻先近くまで
+    アームを伸ばす場合(models.frame_model.arm_pointsの経路がanchor_yより
+    鼻先側(y<0)まで伸びる場合)や、コネクタが鼻先を越えて鼻栓へ向かう
+    場合に、正しい表面位置を得るために使う。
     """
     if y >= 0:
         return surface_profile(params, y)

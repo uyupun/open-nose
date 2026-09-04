@@ -72,20 +72,28 @@ def plot_evolution(generations: list[np.ndarray], out_path: Path) -> None:
 def print_summary(x: np.ndarray, f: np.ndarray, n_feasible: int, n_total: int) -> None:
     """最終世代の実行可能数と、パレートフロント全個体を表として表示する。
 
-    xはパレートフロントの決定変数(FrameParamsの5変数の順)、fは対応する
+    xはパレートフロントの決定変数(FrameParamsの12変数の順)、fは対応する
     目的値(表示用、retention/pain/fit_gapの順)。
     """
     print(f"\n最終世代: 実行可能 {n_feasible}/{n_total} 個体")
     print(f"パレートフロント: {len(f)} 個体\n")
 
     # (見出し, 表示幅)。ヘッダーと各行のフォーマットを同じ定義から組み立て、
-    # 幅がずれて表が崩れることを防ぐ
+    # 幅がずれて表が崩れることを防ぐ。列数が増えた(issue #3)ため、各列の
+    # 幅はclip_angle/arm_length時代より詰めている
     x_columns = [
-        ("clip_angle", 11),
-        ("arm_length", 11),
-        ("arm_thick", 10),
-        ("holder_off", 11),
-        ("grip_depth", 11),
+        ("anchor_y", 8),
+        ("heading", 8),
+        ("len_1", 7),
+        ("turn_2", 7),
+        ("len_2", 7),
+        ("turn_3", 7),
+        ("len_3", 7),
+        ("turn_4", 7),
+        ("len_4", 7),
+        ("thick", 7),
+        ("hold_off", 9),
+        ("grip_d", 7),
     ]
     f_columns = [("retention", 11), ("pain", 8), ("fit_gap", 9)]
 
