@@ -10,9 +10,18 @@
 # 依存パッケージをインストール
 $ uv sync
 
-# 鼻モデルを生成して output/nose.obj に出力
+# 鼻本体・鼻栓・フレームの既定構成一式を生成して output/base.glb に出力
 $ uv run python scripts/export_model.py
 
 # 生成した鼻モデルをインタラクティブビューアで確認
 $ uv run python scripts/view_nose.py
+
+# NSGA-IIでフレーム形状を最適化し、output/evolution.png に出力(パレートフロントは標準出力の表で確認)
+$ uv run python scripts/optimize.py
+
+# 上の表から選んだ候補(clip_angle等の5変数)をglTF(.glb)に出力(base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
+$ uv run python scripts/export_frame.py --clip-angle 46.33 --arm-length 7.10 --arm-thickness 6.00 --holder-offset 11.41 --grip-depth 8.00
+
+# 出力した候補(export_frame.pyの出力等、任意のOBJ/glTFファイル)をインタラクティブビューアで確認
+$ uv run python scripts/view_nose.py output/candidate_best_fit.glb
 ```

@@ -48,8 +48,11 @@ from .nose_model import (
 )
 from .plug_model import PlugParams, plug_outer_end
 
-# フレームのプレースホルダーの色(グレー、半透明)
-_FRAME_COLOR = [90, 90, 100, 220]
+# フレームのプレースホルダーの色(グレー、半透明)。鼻表面との位置関係
+# (めり込み・浮き)が透けて見えるよう、鼻本体(不透明)・鼻栓(alpha=200)より
+# 低いalphaにしている。OBJはalphaを保持できないため、この効果を確認するには
+# glTF(.glb)で書き出す(export_model.py/export_frame.py参照)
+_FRAME_COLOR = [90, 90, 100, 140]
 # 保持部(先端の球)の半径を、arm_thicknessに対する何倍にするか
 _HOLDER_RADIUS_RATIO = 1.4
 # アームの起点(クリップ位置)のy座標(鼻先=0からの距離、mm)。鼻中隔の
