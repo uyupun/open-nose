@@ -1,4 +1,4 @@
-"""フレームの評価関数(v2: 機能性・快適さ・意匠性の3目的+到達性の制約)。
+"""フレームの評価関数(v3: 機能性・快適さ・意匠性の3目的+4制約)。
 PROJECT.md の「評価関数」に対応。
 
 frame_model.build_frame_pair が作る円柱メッシュを経由せず、経路の点列
@@ -6,19 +6,30 @@ frame_model.build_frame_pair が作る円柱メッシュを経由せず、経路
 生成コストを払わずに済むため、遺伝的アルゴリズムが個体ごとに繰り返し
 呼び出す用途でも軽量に計算できる。
 
-- **機能性(function、最大化)**: retention(保持力)。grip_depthが深いほど
-  鼻中隔を強く挟み込み、arm_thicknessが太いほどその挟み込みを維持する
-  剛性が高い、という代理指標。ただしarm_thicknessの寄与は鼻栓自体の
-  直径(plug.diameter)で頭打ちにする(下記の注意点参照)。clip_angleは
-  含めない(下記参照)。到達性(鼻栓の露出端に保持部が届いているか)は
-  reach_gapで別途扱う(0であるべき制約。目的関数を増やしすぎないよう、
-  目的ではなく実行不可能個体を弾く制約として使う想定)
-- **快適さ(comfort、最小化)**: pain(痛み)。retentionと同じgrip_depthの
-  裏返し(圧迫が度を越していないか)
-- **意匠性(style、最小化)**: fit_gap(視覚的一体感)・smoothness(経路の
-  滑らかさ)・proportion_penalty(太さ・長さのプロポーション破綻)の複合。
-  各サブ項目をどう重み付けて1つのスカラーに合成するかはNSGA-II導入時の
-  未決定事項(PROJECT.md参照)のため、ここでは合成せず個別の値を返す
+## v2→v3: 「サブ項目の重み付け合成」をやめ、3目的+4制約に整理した
+
+v2はfit_gap/smoothness/proportion_penaltyを「意匠性」という1軸のサブ項目
+として並べ、合成方法(重み)を未定のまま残していた。しかし7項目のうち
+本当に「トレードオフとして探索したい」ものは少なく、大半は「一定水準を
+満たしていれば良い(わざと少し悪い値を選ぶ理由がない)」という合否に近い
+性質だった。そこで以下のように再整理し、重みを発明する必要自体をなくした:
+
+- **目的(3つ、NSGA-IIが探索するトレードオフ)**:
+  - retention(機能性、最大化): grip_depthを増やせば保持力は上がるが
+    painも増える、という本質的なトレードオフ
+  - pain(快適さ、最小化): retentionと表裏一体
+  - fit_gap(意匠性、最小化。旧fit_gap_mean): 素材の厚み・埋め込み具合との
+    トレードオフとして探る価値がある3つ目の軸
+- **制約(4つ、実行不可能個体を除外するための閾値判定。すべて0または
+  一定値以下であるべき、わざと悪化させる理由がない値)**:
+  - reach_gap: 保持部が鼻栓の露出端に届いているか(0であるべき)
+  - fit_gap_max(旧fit_gap_maxのまま): 平均は良くても局所的に大きく
+    浮いている点がないか
+  - smoothness: 経路がジグザグしていないか
+  - proportion_penalty: 太さが極端に細すぎ/太すぎないか
+  - いずれも実際の閾値(reach_gap以外)はNSGA-II導入時の未決定事項
+    (PROJECT.md参照)。現状のFrameScoreはこれらも生の値のまま返し、
+    閾値判定(制約違反への変換)は呼び出し側(将来のGA連携層)に委ねる
 
 ## retentionにclip_angleを含めない理由
 
@@ -109,8 +120,9 @@ def _reach_gap(sides: list[SidePaths], targets: list[np.ndarray]) -> float:
 def _fit_gap(
     sides: list[SidePaths], body: trimesh.Trimesh, arm_thickness: float
 ) -> tuple[float, float]:
-    """視覚的一体感(意匠性の一部)。表面沿い区間の"円柱表面"から鼻本体表面
-    までの距離の(平均, 最悪点)を返す。値が小さいほど顔に馴染んで見える。
+    """視覚的一体感。表面沿い区間の"円柱表面"から鼻本体表面までの距離の
+    (平均, 最悪点)を返す。値が小さいほど顔に馴染んで見える。平均は目的
+    (fit_gap)、最悪点は制約(fit_gap_max)として使う(FrameScore参照)。
 
     表面沿い区間の点列(surface_points)はメッシュの中心線であり、実際に
     見える/触れるのは半径arm_thickness/2だけ太い円柱の表面。中心線からの
@@ -131,8 +143,10 @@ def _fit_gap(
 
 
 def _smoothness(sides: list[SidePaths]) -> float:
-    """経路の滑らかさ(意匠性の一部、最小化)。表面沿い区間からダイブ区間への
-    遷移角度(度)。0に近いほど、鼻栓へ向けて滑らかに連続する経路になる。
+    """経路の滑らかさ(制約)。表面沿い区間からダイブ区間への遷移角度(度)。
+    0に近いほど、鼻栓へ向けて滑らかに連続する経路になる。「ジグザグ
+    しすぎていないか」という合否に近い性質のため、目的ではなく制約として
+    扱う(FrameScore参照)。
 
     折れ線全体の角度をまとめて評価すると、最適解が単純な直線(無機質な
     針金)に収束してしまう、あるいはサンプリング分割数の副作用を測るだけに
@@ -164,12 +178,12 @@ def _smoothness(sides: list[SidePaths]) -> float:
 def _proportion_penalty(
     sides: list[SidePaths], arm_thickness: float, max_thickness: float
 ) -> float:
-    """プロポーションの破綻(意匠性の一部、最小化)。下限は太さ/全長比が
-    _MIN_THICKNESS_RATIOを下回った分(細すぎ)、上限はarm_thicknessが
-    max_thickness(plug.diameter基準の頭打ち値)を超えた分(太すぎ)を
-    罰則にする(範囲内は0)。上限をplug.diameter基準にする理由はモジュール
-    docstring参照(retentionの頭打ちと同じ基準で、太さだけを稼ぐ抜け道を
-    塞ぐ)。
+    """プロポーションの破綻(制約)。下限は太さ/全長比が_MIN_THICKNESS_RATIOを
+    下回った分(細すぎ)、上限はarm_thicknessがmax_thickness(plug.diameter
+    基準の頭打ち値)を超えた分(太すぎ)を罰則にする(範囲内は0)。上限を
+    plug.diameter基準にする理由はモジュールdocstring参照(retentionの
+    頭打ちと同じ基準で、太さだけを稼ぐ抜け道を塞ぐ)。範囲内は0で、わざと
+    少し破綻させたい理由がないため目的ではなく制約として扱う(FrameScore参照)。
     """
     penalties = []
     for points, path in sides:
@@ -187,20 +201,24 @@ def _proportion_penalty(
 
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値。
+    """フレームの評価値(目的3つ+制約4つ。モジュールdocstring参照)。
 
-    retention(機能性)は最大化、他は最小化。reach_gapは目的ではなく制約
-    (0であるべき)として別枠で保持する。styleのサブ項目は重み付け方法が
-    未定(PROJECT.md参照)のため、合成せず個別の値のまま返す。
+    目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
+    retentionのみ最大化、他は最小化。制約(reach_gap以下の4項目)は
+    実行不可能個体を除外するための値で、いずれも0または一定値以下で
+    あるべき(わざと悪化させて選ぶ理由がない)。実際の閾値判定は
+    未実装で、生の値のまま返す(モジュールdocstring参照)。
     """
 
+    # 目的(3つ)
     retention: float  # 機能性(最大化)
-    reach_gap: float  # 制約(0であるべき)
     pain: float  # 快適さ(最小化)
-    fit_gap_mean: float  # 意匠性: 視覚的一体感・平均(最小化)
-    fit_gap_max: float  # 意匠性: 視覚的一体感・最悪点(最小化)
-    smoothness: float  # 意匠性: 経路の滑らかさ(最小化)
-    proportion_penalty: float  # 意匠性: プロポーション破綻(最小化)
+    fit_gap: float  # 意匠性: 視覚的一体感・平均(最小化)
+    # 制約(4つ。すべて0または一定値以下であるべき)
+    reach_gap: float  # 保持部が鼻栓の露出端に届いているか(0であるべき)
+    fit_gap_max: float  # 局所的な浮きの最悪点(閾値未定)
+    smoothness: float  # 経路の折れの急峻さ(閾値未定)
+    proportion_penalty: float  # 太さの破綻(0であるべき)
 
 
 def evaluate_frame(
@@ -222,14 +240,16 @@ def evaluate_frame(
         for side in (-1, 1)
     ]
     max_thickness = plug.diameter * _MAX_THICKNESS_TO_PLUG_DIAMETER
-    fit_gap_mean, fit_gap_max = _fit_gap(sides, body, frame.arm_thickness)
+    fit_gap, fit_gap_max = _fit_gap(sides, body, frame.arm_thickness)
 
     return FrameScore(
         retention=_retention(frame, plug),
-        reach_gap=_reach_gap(sides, targets),
         pain=_pain(frame),
-        fit_gap_mean=fit_gap_mean,
+        fit_gap=fit_gap,
+        reach_gap=_reach_gap(sides, targets),
         fit_gap_max=fit_gap_max,
         smoothness=_smoothness(sides),
-        proportion_penalty=_proportion_penalty(sides, frame.arm_thickness, max_thickness),
+        proportion_penalty=_proportion_penalty(
+            sides, frame.arm_thickness, max_thickness
+        ),
     )
