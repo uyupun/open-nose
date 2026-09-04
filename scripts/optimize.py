@@ -4,8 +4,7 @@ evaluate_frame/constraint_values(scripts/evaluation.py)をpymooのProblemで
 ラップし、FrameParamsの5設計変数を探索してパレートフロントを求める。
 可視化・結果表示はoptimize_report.py側の責務とし、このファイルは実行
 (FrameProblemの定義とminimize()の呼び出し)だけを持つ。個体数・世代数は
-未決定事項のため、CLI引数で調整できるようにしている(PROJECT.md「NSGA-IIの
-パラメータ設定」参照)。
+未決定事項のため、CLI引数で調整できるようにしている。
 
 ## 目的関数の符号
 
@@ -25,25 +24,19 @@ FrameParams.__post_init__が要求する下限(arm_length>=1.0、clip_angle>0等
   _MAX_CLIP_ANGLE(60.0)をそのまま使う
 - arm_length: 下限は_MIN_ARM_LENGTH(1.0)。上限は明確な基準がないため、
   _ARM_ANCHOR_Y(6.0)や鼻先までの距離感を踏まえた15.0mmとした。retentionが
-  arm_lengthに比例するようになった(evaluation.pyのモジュールdocstring
-  「retentionにarm_lengthを掛ける理由」参照)ため、下限に張り付く傾向は
-  解消された。実際に既定設定(pop_size=50, n_gen=60)で動かすと、上限
-  (15.0mm)まで達する前に約6〜8.7mm付近で釣り合う結果になった。smoothness
-  制約をアーム→コネクタの継ぎ目まで含む経路全体に一般化した後(issue #2)は、
-  grip_ring_marginに加えてsmoothnessもこの範囲でほぼ同時に頭打ちになる
-  (アームが長いほどコネクタとの継ぎ目の折れが急になりやすいため)
+  アームの実長に比例する(evaluation.pyのモジュールdocstring参照)ため、
+  下限には張り付かない。実際に既定設定(pop_size=50, n_gen=60)で動かすと、
+  上限(15.0mm)まで達する前に、grip_ring_margin・smoothness(アームが長い
+  ほどコネクタとの継ぎ目の折れが急になりやすい)が同時に頭打ちになる
+  約6〜8.7mm付近で釣り合う結果になった
 - arm_thickness: 下限0.5mm(針のように細すぎない程度)。上限8.0mmは
-  retention/proportion_penaltyが頭打ちにする値より余裕を持って大きくし、
-  制約の境界が探索範囲の内側に来るようにした(境界ちょうどが上限だと、
-  GAがその外側を探れず境界形状を見誤る)。境界はplug.diameter(6.0mm)。
-  以前はholder_size_penalty(保持部の球の直径がplug.diameterを超えた分を
-  罰則にする制約)がarm_thickness換算で約2.14mmとより厳しい境界を作って
-  いたが、保持部の球自体を廃止した(evaluation.pyのモジュールdocstring
-  「holder_size_penaltyを廃止した理由」参照)ため、この境界は消滅した
+  retention/proportion_penaltyが頭打ちにする境界(plug.diameter=6.0mm)より
+  余裕を持って大きくし、制約の境界が探索範囲の内側に来るようにした
+  (境界ちょうどが上限だと、GAがその外側を探れず境界形状を見誤る)
 - holder_offset: 下限0(dataclass上の下限)。上限12.0mmは、デフォルト設定
   での実際の到達距離(dive_dist、約8mm)より少し余裕を持たせた値
-  (PROJECT.mdの既知の限界の通り、dive_distを超えると評価に無反応になる
-  平坦領域に入るため、それ以上大きくしても意味はない)
+  (connector_points参照。dive_distを超えると評価に無反応になる平坦領域に
+  入るため、それ以上大きくしても意味はない)
 - grip_depth: 下限0(dataclass上の下限)。上限8.0mmは、デフォルト設定での
   アーム起点における鼻の局所的な厚み(実測: 約11.1mm、front_surface_z_at_
   center - back_surface_z_at_centerで計算)を踏まえ、arm_thicknessが薄い

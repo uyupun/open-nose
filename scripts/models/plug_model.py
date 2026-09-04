@@ -1,4 +1,4 @@
-"""鼻栓本体のプレースホルダー(PROJECT.md の「鼻栓寸法」に対応)。"""
+"""鼻栓本体のプレースホルダー。"""
 
 from dataclasses import dataclass
 from typing import Literal
