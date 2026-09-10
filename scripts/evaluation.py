@@ -75,8 +75,8 @@ from models.frame_model import (
     validate_anchor_height,
     validate_target_reach,
 )
-from models.nose_model import NoseParams, build_nose_body
-from models.plug_model import PlugParams, plug_outer_end
+from commons.nose_model import NoseParams, build_nose_body
+from commons.plug_model import PlugParams, plug_outer_end
 
 # プロポーション評価(下限)で許容する、太さ(arm_thickness)/全長 比の下限。
 # 固定の「理想比率」を目標にすると設計者個人の美意識を客観指標と偽装する

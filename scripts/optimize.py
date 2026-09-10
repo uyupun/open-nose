@@ -63,8 +63,8 @@ from pymoo.optimize import minimize
 
 from evaluation import constraint_values, evaluate_frame
 from models.frame_model import FrameParams, validate_anchor_height, validate_target_reach
-from models.nose_model import NoseParams
-from models.plug_model import PlugParams
+from commons.nose_model import NoseParams
+from commons.plug_model import PlugParams
 from optimize_report import plot_evolution, print_summary
 
 # 探索変数(名前, 下限, 上限)。FrameParamsのフィールド順と揃える(この順で

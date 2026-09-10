@@ -3,8 +3,8 @@
 import trimesh
 
 from .frame_model import FrameParams, build_frame_pair
-from .nose_model import NoseParams, build_nose_body
-from .plug_model import PlugParams, build_plug_pair
+from commons.nose_model import NoseParams, build_nose_body
+from commons.plug_model import PlugParams, build_plug_pair
 
 
 def build_full_scene(frame: FrameParams | None = None) -> trimesh.Scene:

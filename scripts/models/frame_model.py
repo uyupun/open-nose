@@ -57,7 +57,7 @@ import numpy as np
 import trimesh
 from shapely.geometry import Point
 
-from .nose_model import (
+from commons.nose_model import (
     NoseParams,
     back_surface_z_at_center,
     build_nose_body,
@@ -65,7 +65,7 @@ from .nose_model import (
     front_surface_z_at_offset,
     tip_cap_min_y,
 )
-from .plug_model import PlugParams, plug_outer_end
+from commons.plug_model import PlugParams, plug_outer_end
 
 # フレームのプレースホルダーの色(グレー、半透明)。鼻表面との位置関係
 # (めり込み・浮き)が透けて見えるよう、鼻本体(alpha=210)・鼻栓(alpha=200)
