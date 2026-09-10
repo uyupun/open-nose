@@ -1,7 +1,7 @@
 """NSGA-IIの候補(FrameParamsの11変数)を鼻モデルと組み合わせてglTF(.glb)に出力するスクリプト。
 
 FrameParamsの各フィールドに対応するCLI引数で候補フレームを指定する。省略すると既定
-形状になる。export_model.pyが出力するoutput/base.glb(常に既定形状)とは
+形状になる。export_model.pyが出力するoutput/models/base.glb(常に既定形状)とは
 別ファイルに書き出すため、既定形状を上書きしない。出力ファイル名は
 省略すると実行時刻から自動生成する(複数の候補を見比べるとき、後から
 実行したものが前のものを上書きしてしまわないようにするため)。
@@ -38,8 +38,9 @@ def main() -> None:
     frame = FrameParams(**{f.name: getattr(args, f.name) for f in fields(FrameParams)})
     scene = build_full_scene(frame)
 
-    out_dir = Path("output")
-    out_dir.mkdir(exist_ok=True)
+    # 出力先。設計ごとに分ける(鼻ピアス型はoutput/earrings/)
+    out_dir = Path("output/models")
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_name = args.output_name or f"candidate_{datetime.now():%Y%m%d_%H%M%S}.glb"
     out_path = out_dir / out_name
     scene.export(out_path)

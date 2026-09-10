@@ -126,7 +126,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--pop-size", type=int, default=50)
     parser.add_argument("--n-gen", type=int, default=60)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--output-dir", type=Path, default=Path("output"))
+    # 出力先。設計ごとに分ける(鼻ピアス型はoutput/earrings/)
+    parser.add_argument("--output-dir", type=Path, default=Path("output/models"))
     return parser.parse_args()
 
 
