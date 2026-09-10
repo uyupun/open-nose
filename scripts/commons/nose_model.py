@@ -370,9 +370,9 @@ def surface_profile_at(params: NoseParams, y: float) -> tuple[float, float, floa
     前面迫り出しはtip_cap_depth_front、半幅はtip_cap_half_width、背面奥行きは
     _BACK_DEPTH(この区間は鼻根から十分離れており_root_waist_depth_bumpの
     影響を受けないため、_tip_fillet_ringsのring_at_y呼び出しと同じ扱い)を使う。
-    front_surface_z_at_center/front_surface_z_at_offsetが、コネクタ
-    (models.frame_model.connector_points)が鼻先付近を通ったり、鼻先を
-    越えて鼻栓へ向かったりする場合に、正しい表面位置を得るために使う。
+    front_surface_z_at_center/front_surface_z_at_offset(models.frame_model、
+    アーム+コネクタ設計)や、earrings.frame_model.ring_points(鼻ピアス型
+    設計)が、鼻先付近の表面位置・半幅を得るために使う。
     """
     if y >= 0:
         return surface_profile(params, y)
@@ -527,8 +527,10 @@ def _build_nose_body_cached(params: NoseParams) -> trimesh.Trimesh:
     # Zバッファで隠れて見えなくなる(フレーム側を半透明にしても、不透明な
     # 鼻本体が手前にあれば深度テストで弾かれてしまうため)。鼻本体も半透明に
     # することで、めり込み部分が透けて見えるようにする(models.frame_model.
-    # _FRAME_COLORのdocstring参照)
-    body.visual.face_colors = [255, 220, 200, 210]
+    # _FRAME_COLORのdocstring参照)。以前はalpha=210だったが、フレームの
+    # ステムが鼻孔の中(鼻の下面より上)を通る設計になり、皮膚越しでは
+    # ステムがほとんど見えなくなった(実機で確認)ため140まで下げた
+    body.visual.face_colors = [255, 220, 200, 140]
     return body
 
 

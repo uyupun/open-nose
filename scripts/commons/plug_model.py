@@ -92,6 +92,15 @@ def _build_plug(
     return mesh
 
 
+# 鼻栓プレースホルダーの色(青、強めの半透明)。フレームのステムは鼻栓の
+# 中を軸方向に通って刺さる(models.frame_model.stem_points参照)ため、
+# 鼻栓が不透明に近い(以前はalpha=200)とステムが隠れて「刺さっているか」
+# を目視できない。フレーム(alpha=200)より十分低いalphaにして、鼻栓越しに
+# ステムが見えるようにする。OBJはalphaを保持できないため、この効果を
+# 確認するにはglTF(.glb)で書き出す(export_model.py/export_frame.py参照)
+_PLUG_COLOR = [120, 160, 220, 80]
+
+
 def build_plug_pair(
     plug: PlugParams, gap: float, depth_front: float
 ) -> tuple[trimesh.Trimesh, trimesh.Trimesh]:
@@ -100,6 +109,6 @@ def build_plug_pair(
         _build_plug(plug, gap=gap, depth_front=depth_front, side=side)
         for side in (-1, 1)
     )
-    plug_left.visual.face_colors = [120, 160, 220, 200]
-    plug_right.visual.face_colors = [120, 160, 220, 200]
+    plug_left.visual.face_colors = _PLUG_COLOR
+    plug_right.visual.face_colors = _PLUG_COLOR
     return plug_left, plug_right
