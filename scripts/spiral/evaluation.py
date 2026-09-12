@@ -26,19 +26,22 @@ earrings(「b」字型)と保持の仕組みが根本的に違うため、目的
   まま巻き数だけ増やす、逆に巻き数を保ったまま半径を大きくする、が
   それぞれ可能で、どちらもweightを増やす方向に働くため、この2つと
   weightの間に本質的なトレードオフがある)
-- **制約(5つ)**: radius_order_margin・coil_clearance_margin・
-  stem_clearance_margin・plug_insertion_margin・plug_overshoot_margin
-  (FrameScore参照)。実際の閾値はいずれも暫定値で、NSGA-IIを実際に
-  動かしながら見直す前提
+- **制約(6つ)**: thickness_order_margin・radius_order_margin・
+  coil_clearance_margin・stem_clearance_margin・plug_insertion_margin・
+  plug_overshoot_margin(FrameScore参照)。実際の閾値はいずれも暫定値で、
+  NSGA-IIを実際に動かしながら見直す前提
 
 ## weight(重さ)の構成
 
-weight = コイル(渦巻き+コネクタ)の経路長×断面積(π×(wire_thickness/2)^2)
-+ ステムの体積。針金1本の実際の体積の代理指標で、値が大きいほど鼻栓
-(ティッシュ)にかかる重さ・てこの力が増え、外れやすくなる・不快になる
-と考えられるため最小化する。frame_modelがコイル・ステムを同じ線径
-(wire_thickness)にしているため、断面積は共通で経路長の合計だけで
-決まる。
+weight = コイル(追従区間+渦巻き+コネクタ)の経路長×断面積
+(π×(coil_thickness/2)^2) + ステムの経路長×断面積(π×(stem_thickness/2)^2)。
+針金の実際の体積の代理指標で、値が大きいほど鼻栓(ティッシュ)にかかる
+重さ・てこの力が増え、外れやすくなる・不快になると考えられるため
+最小化する。以前はコイル・ステムに共通の線径(wire_thickness)を使って
+いたが、ユーザー指摘「評価後が細すぎるので、鼻栓に刺す部分以外は
+ピアス同様に太くしてほしい」を受けてcoil_thickness/stem_thicknessに
+分けた(frame_model.pyのモジュールdocstring参照)ため、断面積も区間ごとに
+別々に計算する。
 
 ## visibility・turns(意匠性)の構成
 
@@ -65,7 +68,8 @@ from spiral.frame_model import (
     plug_overshoot_margin,
     radius_order_margin,
     stem_clearance_margin,
-    validate_anchor_height,
+    thickness_order_margin,
+    validate_follow_height,
     validate_target_reach,
 )
 
@@ -81,29 +85,30 @@ def _path_length(points: list[np.ndarray]) -> float:
 
 
 def _weight(frame: FrameParams, coil_length: float) -> float:
-    """重さ(快適さの代理指標、最小化)。コイル+コネクタ+ステムを1本の
-    針金とみなした体積(mm^3)。モジュールdocstring「weight(重さ)の構成」
-    参照。
+    """重さ(快適さの代理指標、最小化)。コイル(太さcoil_thickness)+
+    ステム(太さstem_thickness)を1本の針金とみなした体積(mm^3)。
+    モジュールdocstring「weight(重さ)の構成」参照。
     """
-    total_length = coil_length + frame.stem_length
-    area = np.pi * (frame.wire_thickness / 2) ** 2
-    return total_length * area
+    coil_area = np.pi * (frame.coil_thickness / 2) ** 2
+    stem_area = np.pi * (frame.stem_thickness / 2) ** 2
+    return coil_length * coil_area + frame.stem_length * stem_area
 
 
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約5つ。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約6つ。モジュールdocstring参照)。
 
     目的(visibility/weight/turns)はNSGA-IIが探索するトレードオフ。
-    weightのみ最小化、他は最大化。制約(radius_order_margin以下の5項目)は
-    実行不可能個体を除外するための値で、いずれも0以下であるべき。
+    weightのみ最小化、他は最大化。制約(thickness_order_margin以下の
+    6項目)は実行不可能個体を除外するための値で、いずれも0以下であるべき。
     """
 
     # 目的(3つ)
     visibility: float  # 意匠性: コイルの皮膚からの突き出し(mm、最大化)
     weight: float  # 快適さ: コイル+ステムの体積(mm^3、最小化)
     turns: float  # 意匠性: 渦の巻き数(最大化)
-    # 制約(5つ。すべて0以下であるべき)
+    # 制約(6つ。すべて0以下であるべき)
+    thickness_order_margin: float  # コイルがステムより太いか(0以下であるべき)
     radius_order_margin: float  # 渦が中心に向かって細くなっているか(0以下であるべき)
     coil_clearance_margin: float  # コイルのめり込み超過量(0以下であるべき)
     stem_clearance_margin: float  # ステムのめり込み量(0以下であるべき)
@@ -117,10 +122,11 @@ _MARGIN_EPSILON = 1e-6
 
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
-    """FrameScoreの5つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    """FrameScoreの6つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
     """
     return (
+        score.thickness_order_margin - _MARGIN_EPSILON,
         score.radius_order_margin - _MARGIN_EPSILON,
         score.coil_clearance_margin - _MARGIN_EPSILON,
         score.stem_clearance_margin - _MARGIN_EPSILON,
@@ -134,14 +140,14 @@ def evaluate_frame(
 ) -> FrameScore:
     """FrameParams から快適さ・意匠性の評価値を計算する。
 
-    frameに依存しない検証(validate_target_reach/validate_anchor_height)は
+    frameに依存しない検証(validate_target_reach/validate_follow_height)は
     例外で即座に止める。frameに依存する検証(radius_order_margin等)は
     例外で止めず、制約値としてFrameScoreに含める(earrings.evaluation.py
     と同じ方針)。
     """
     validate_target_reach(plug, params)
     body = build_nose_body(params)
-    validate_anchor_height(params, body)
+    validate_follow_height(params, body)
     sides: list[SidePaths] = [
         build_side_paths(frame, plug, params, body, side) for side in (-1, 1)
     ]
@@ -162,9 +168,10 @@ def evaluate_frame(
         visibility=visibility,
         weight=_weight(frame, coil_length),
         turns=frame.turns,
+        thickness_order_margin=thickness_order_margin(frame),
         radius_order_margin=radius_order_margin(frame),
         coil_clearance_margin=coil_clearance_margin(frame, sides, body),
-        stem_clearance_margin=stem_clearance_margin(sides, body, frame.wire_thickness),
+        stem_clearance_margin=stem_clearance_margin(sides, body, frame.stem_thickness),
         plug_insertion_margin=max(insertion_margins),
         plug_overshoot_margin=max(overshoot_margins),
     )
