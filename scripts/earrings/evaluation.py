@@ -1,4 +1,4 @@
-"""フレームの評価関数(機能性・快適さ・意匠性の3目的+制約)。
+"""鼻ピアス型(「b」字)フレームの評価関数(機能性・快適さ・意匠性の3目的+制約)。
 
 frame_model.build_frame_pair が作るチューブメッシュを経由せず、経路の点列
 (build_side_paths)と鼻本体メッシュだけを使って評価する。メッシュの生成
@@ -15,16 +15,13 @@ frame_model.build_frame_pair が作るチューブメッシュを経由せず、
 している:
 
 - **目的(3つ、NSGA-IIが探索するトレードオフ)**: retention(機能性、
-  最大化)・pain(快適さ、最小化)・fit_gap(意匠性、最小化)
-- **制約(9つ、実行不可能個体を除外するための閾値判定)**: fit_gap_max・
-  proportion_penalty・thickness_order_margin・stem_plug_margin・
-  hoop_visibility_margin・ring_clearance_margin・stem_clearance_margin・
-  plug_insertion_margin・plug_overshoot_margin(FrameScore参照)。実際の
-  閾値はいずれも暫定値で、NSGA-IIを実際に動かしながら見直す前提。
-  hoop_visibility_margin(フープが鼻の横に見えること)は、retention
-  (剛性∝1/半径^3)・fit_gap(皮膚への密着)がどちらも小さなフープを
-  有利にするため、目的だけに任せるとGAがフープを鼻孔の中に隠して
-  しまう(実際に確認)ことへの対策として置いた設計要件の制約
+  最大化)・pain(快適さ、最小化)・visibility(意匠性、最大化)
+- **制約(9つ、実行不可能個体を除外するための閾値判定)**:
+  proportion_penalty・thickness_order_margin・hook_reach_margin・
+  stem_entry_margin・hoop_visibility_margin・ring_clearance_margin・
+  stem_clearance_margin・plug_insertion_margin・plug_overshoot_margin
+  (FrameScore参照)。実際の閾値はいずれも暫定値で、NSGA-IIを実際に
+  動かしながら見直す前提
 
 ## retention(挟み力)とpain(圧力)の構成
 
@@ -33,13 +30,19 @@ frame_model.build_frame_pair が作るチューブメッシュを経由せず、
 frame_modelのモジュールdocstring参照)。この挟み力と、それが皮膚に
 与える圧力を、次の単純な代理指標で表す:
 
-- **retention = 挟み力 ∝ バネ剛性 × たわみ**。C字リング(円弧状の
-  線材バネ)の開口部の剛性は、線材の曲げ剛性EI(I∝線径^4)に比例し、
-  半径の3乗に反比例する(曲げ変形の基本式)。たわみはring_depth
-  (終端を皮膚へ押し込む量)。既定値で1になるよう正規化した
-  ring_depth × (ring_thickness/既定)^4 / (ring_radius/既定)^3。
-  大きなフープほど柔らかく、太い線ほど硬い、という実物のフープの
-  挙動に対応する
+- **retention = 挟み力 ∝ バネ剛性 × たわみ**。フック(円弧+鼻の下を
+  通る直線+小さな曲げ)を片持ち梁とみなすと、その剛性は線材の曲げ剛性
+  EI(I∝線径^4)に比例し、梁の全長Lの3乗に反比例する(k=3EI/L^3)。Lは
+  earrings.frame_model.ring_pointsの経路の実際の全長(_path_length)。
+  以前はLの代わりにring_radius(円弧の半径)を使っていたが、フックが
+  「円弧+直線+曲げ」の複合経路になった後は、隙間角度(ring_gap_deg)や
+  直線区間の長さが変わっても半径が同じなら剛性が変わらず、実際には
+  より柔らかい個体を過大評価していた(_clamp_forceのdocstring参照)。
+  たわみはmax(ring_depth, 0)(終端を皮膚へ押し込む量。0未満クランプの
+  理由は_clamp_forceのdocstring参照)。既定値で1になるよう正規化した
+  ring_depth × (ring_thickness/既定)^4 × (経路長/既定)^-3。大きく柔らかい
+  フープほどたわみにくく、太い線ほど硬い、という実物のフープの挙動に
+  対応する
 - **pain = 圧力 ∝ 挟み力 / 接触面積**。接触面積は「実際に皮膚に触れて
   いるリングの弧長(earrings.frame_model.ring_contact_length、メッシュに
   対する符号付き距離で実測)×線径」。点接触に近い場合でも線径×線径の
@@ -55,38 +58,54 @@ retentionが増える誤った圧力がかかっていた、(3) 太さがretenti
 されたため置き換えた。新しい定義では太い線は挟み力も圧力も上げるため、
 太さの違う個体がパレートフロント上に並ぶ。
 
+## visibility(意匠性)の構成
+
+visibility = フープの最外点が鼻翼の皮膚より外側へ出ている量
+(earrings.frame_model.hoop_protrusion、mm)。実際の鼻ピアスのフープは
+鼻の横に見えてこそ装飾であり、大きく張り出すほどピアスらしい。一方で
+大きなフープはバネとして柔らかく(retention∝1/半径^3)、剛性を保とうと
+すれば線を太くして圧力が上がるため、retention/painとの本質的な
+トレードオフになる。
+
+以前は意匠性をfit_gap(リングの上側の円弧がどれだけ皮膚に沿っているか、
+最小化)としていたが、それだとGAが皮膚に張り付いた小さなリングを最良と
+みなし、(1) 実物としては鼻翼に通せない(沿わせすぎ)、(2) リングが
+鼻栓の周りの低い位置に収まって鼻翼まで届かず、鼻ピアスらしく見えない、
+という指摘を受けたため、方向を逆にした。皮膚への密着は目的にも制約にも
+していない(めり込みすぎだけをring_clearance_marginが弾く)。
+
 ステムが鼻栓(ティッシュ)を保持する力は、フレーム→鼻翼の挟みと直列に
 働くが、刺さり込みの長さが十分あれば律速にならない(ティッシュは軽い)
-ため、目的には含めず「最低earrings.frame_model._MIN_PLUG_INSERTIONだけ
-刺さっていること」の制約(plug_insertion_margin)として扱う。この結果
-stem_length/stem_thicknessは目的に直接効かず、制約(刺さり込み・
-突き抜け・鼻栓内に収まる・太さの順序・プロポーション)を満たす範囲で
+ため、目的には含めず「最低plug.length×earrings.frame_model._MIN_
+INSERTION_TO_PLUG_LENGTHだけ刺さっていること」の制約(plug_insertion_
+margin)として扱う。この結果stem_length/stem_thicknessは目的に直接効かず、
+制約(刺さり込み・突き抜け・太さの順序・プロポーション)を満たす範囲で
 自由になる。
 """
 
 from dataclasses import dataclass
 
 import numpy as np
-import trimesh
 
+from commons.nose_model import NoseParams, build_nose_body
+from commons.plug_model import PlugParams
 from earrings.frame_model import (
     FrameParams,
     SidePaths,
     build_side_paths,
+    hook_reach_margin,
+    hoop_protrusion,
     hoop_visibility_margin,
     plug_insertion_margin,
     plug_overshoot_margin,
     ring_clearance_margin,
     ring_contact_length,
-    ring_upper_points,
     stem_clearance_margin,
-    stem_plug_margin,
+    stem_entry_margin,
     thickness_order_margin,
     validate_ring_height,
     validate_target_reach,
 )
-from commons.nose_model import NoseParams, build_nose_body
-from commons.plug_model import PlugParams
 
 # プロポーション評価(下限)で許容する、太さ(stem_thickness)/全長 比の下限。
 # 固定の「理想比率」を目標にすると設計者個人の美意識を客観指標と偽装する
@@ -97,13 +116,14 @@ _MIN_THICKNESS_RATIO = 0.03
 # plug.diameterに対する倍率(挟んでいる相手=鼻栓より太い棒にする理由は
 # ない、という考え方)
 _MAX_THICKNESS_TO_PLUG_DIAMETER = 1.0
-# retention(バネ剛性)の正規化に使う基準値(mm)。FrameParamsの既定値と
-# 同じにして、既定値で剛性が1になるようにする。剛性は線径の4乗/半径の
-# 3乗という強い非線形なので、正規化しないと探索範囲内で数桁の値になり
-# 表示・比較しづらい(パレート順位は単調変換で変わらないため、値の
+# retention(バネ剛性)の正規化に使う基準値(mm)。FrameParamsの既定値
+# (ring_radius=7.5, ring_gap_deg=80.0)でのリング経路長(_path_length(ring)、
+# 実測31.9mm)と同じにして、既定値で剛性が1になるようにする。剛性は線径の
+# 4乗/経路長の3乗という強い非線形なので、正規化しないと探索範囲内で数桁の
+# 値になり表示・比較しづらい(パレート順位は単調変換で変わらないため、値の
 # 見やすさだけの措置)
 _REF_RING_THICKNESS = 1.4
-_REF_RING_RADIUS = 4.0
+_REF_RING_LENGTH = 31.9
 
 
 def _path_length(points: list[np.ndarray]) -> float:
@@ -113,26 +133,44 @@ def _path_length(points: list[np.ndarray]) -> float:
     )
 
 
-def _clamp_force(frame: FrameParams) -> float:
+def _clamp_force(frame: FrameParams, ring_length: float) -> float:
     """リングの挟み力の代理指標(バネ剛性×たわみ、既定値で剛性1に正規化)。
     理由はモジュールdocstring「retention(挟み力)とpain(圧力)の構成」参照。
     retention・painの両方から参照される。
+
+    片持ち梁のたわみ剛性(k=3EI/L^3)にならい、Lをearrings.frame_model.
+    ring_pointsの経路(大きな円弧+鼻の下を通る直線+小さな曲げ)の実際の
+    全長とする。以前はring_radius(円弧の半径)を使っていたが、フックが
+    「円弧+直線+曲げ」の複合経路になった後は、隙間角度(ring_gap_deg)や
+    鼻の下を通る直線区間の長さ(円弧の中心と鼻栓の軸の距離で決まる)が
+    変わっても半径が同じなら剛性の見積もりが変わらず、実際にはより長い
+    経路(=より柔らかい)個体を過大評価していた。経路長を使えば、隙間が
+    狭く円弧が長い個体や、直線区間が長い個体を正しく「柔らかい」と
+    評価できる。
+
+    たわみ(frame.ring_depth)は0未満を0にクランプする。earrings.
+    frame_model.ring_clearance_marginを実測の隙間ベースの制約に変更した
+    後、線材が細い個体では接触点を皮膚より外側へ引く(ring_depthを負に
+    する)ことでしか隙間を満たせない場合がある(earrings.frame_model.
+    FrameParams参照)。この場合は皮膚に触れてすらいないため、挟み力は
+    負ではなく0が正しい。
     """
+    deflection = max(frame.ring_depth, 0.0)
     stiffness = (frame.ring_thickness / _REF_RING_THICKNESS) ** 4 / (
-        frame.ring_radius / _REF_RING_RADIUS
+        ring_length / _REF_RING_LENGTH
     ) ** 3
-    return stiffness * frame.ring_depth
+    return stiffness * deflection
 
 
-def _retention(frame: FrameParams) -> float:
+def _retention(frame: FrameParams, ring_length: float) -> float:
     """保持力(機能性、最大化)。リングの挟み力そのもの(_clamp_force)。
 
     左右のリングは形状が鏡映で等しいため片側で十分。
     """
-    return _clamp_force(frame)
+    return _clamp_force(frame, ring_length)
 
 
-def _pain(frame: FrameParams, contact_length: float) -> float:
+def _pain(frame: FrameParams, ring_length: float, contact_length: float) -> float:
     """痛み(快適さ、最小化)。皮膚にかかる圧力の代理指標=挟み力/接触面積。
 
     接触面積は接触長×線径。接触長は線径を下限にする(接触が1点に近くても
@@ -141,44 +179,7 @@ def _pain(frame: FrameParams, contact_length: float) -> float:
     ring_contact_length)。左右は鏡映で等しいため片側で十分。
     """
     area = max(contact_length, frame.ring_thickness) * frame.ring_thickness
-    return _clamp_force(frame) / area
-
-
-def _fit_gap(
-    sides: list[SidePaths], body: trimesh.Trimesh, ring_thickness: float
-) -> tuple[float, float]:
-    """視覚的な自然さ。リングのうち鼻翼の皮膚に沿って上る部分(earrings.
-    frame_model.ring_upper_points)の"円柱表面"から鼻本体表面までの距離の
-    (平均, 最悪点)を返す。値が小さいほど、実際の鼻ピアスのフープが
-    鼻翼の皮膚に沿って見えるのと同じく、リングが鼻翼に密着して自然に
-    見える。平均は目的(fit_gap)、最悪点は制約(fit_gap_max)として使う
-    (FrameScore参照)。
-
-    リングの下端(鼻孔の縁の下の空間)・内側の端(鼻孔の中)は、皮膚から
-    離れているのが正常(輪の内側に空間があるからこそピアスらしく見える)
-    なので評価対象にしない。ステムも鼻孔の中を通る想定で皮膚との距離に
-    意味がないため対象外。対象の点が1つもない側(ring_gap_degが大きく、
-    接触点より上の円弧が存在しない場合)は0(=浮きなし)として扱う。
-
-    半径分を引くのは中心線からの距離が、実際に見える太いチューブ表面の
-    隙間より過大に出るため。
-
-    closest_point(rtreeによる空間索引を使う高速版)を使う。総当たりの
-    closest_point_naiveより速く、結果は変わらない(frame_model.
-    _signed_distance_to_bodyのdocstring参照)。
-    """
-    means, maxes = [], []
-    for ring, _ in sides:
-        upper = ring_upper_points(ring)
-        if len(upper) == 0:
-            means.append(0.0)
-            maxes.append(0.0)
-            continue
-        _, distance, _ = trimesh.proximity.closest_point(body, upper)
-        tube_distance = np.maximum(distance - ring_thickness / 2, 0.0)
-        means.append(float(np.mean(tube_distance)))
-        maxes.append(float(np.max(tube_distance)))
-    return max(means), max(maxes)
+    return _clamp_force(frame, ring_length) / area
 
 
 def _proportion_penalty(
@@ -196,7 +197,7 @@ def _proportion_penalty(
     """
     penalties = []
     for ring, stem in sides:
-        # リングの弧長+ステムの全長(ring[-1]==stem[0]で接続しているので
+        # リングの経路長+ステムの全長(ring[-1]==stem[0]で接続しているので
         # 単純な和でよい)
         length = _path_length(ring) + _path_length(stem)
         ratio = stem_thickness / length
@@ -210,31 +211,29 @@ def _proportion_penalty(
 class FrameScore:
     """フレームの評価値(目的3つ+制約9つ。モジュールdocstring参照)。
 
-    目的(retention/pain/fit_gap)はNSGA-IIが探索するトレードオフ。
-    retentionのみ最大化、他は最小化。制約(fit_gap_max以下の9項目)は
-    実行不可能個体を除外するための値で、いずれも0または一定値以下で
-    あるべき(わざと悪化させて選ぶ理由がない)。
+    目的(retention/pain/visibility)はNSGA-IIが探索するトレードオフ。
+    painのみ最小化、他は最大化。制約(proportion_penalty以下の9項目)は
+    実行不可能個体を除外するための値で、いずれも0以下であるべき
+    (わざと悪化させて選ぶ理由がない)。
 
-    thickness_order_margin/stem_plug_margin/hoop_visibility_margin/
-    ring_clearance_margin/stem_clearance_margin/plug_insertion_margin/
-    plug_overshoot_marginは、
-    earrings.frame_model.pyのvalidate_*(build_frame_pairが使う、例外を
-    送出する版)と対になる制約値。frameの探索によって結果が変わる検証
-    なので、evaluate_frameは例外で止めずこれらを制約として返す
-    (earrings.frame_model.pyのモジュールdocstring参照)。
+    thickness_order_margin以下の制約は、earrings.frame_model.pyの
+    validate_*(build_frame_pairが使う、例外を送出する版)と対になる
+    制約値。frameの探索によって結果が変わる検証なので、evaluate_frameは
+    例外で止めずこれらを制約として返す(earrings.frame_model.pyの
+    モジュールdocstring参照)。
     """
 
     # 目的(3つ)
     retention: float  # 機能性: リングの挟み力(既定値=1の相対値、最大化)
     pain: float  # 快適さ: 皮膚にかかる圧力(挟み力/接触面積、最小化)
-    fit_gap: float  # 意匠性: リングの鼻翼への密着・平均(mm、最小化)
-    # 制約(9つ。すべて0または一定値以下であるべき)
-    fit_gap_max: float  # 局所的な浮きの最悪点(閾値: _FIT_GAP_MAX_THRESHOLD)
+    visibility: float  # 意匠性: フープの皮膚からの突き出し(mm、最大化)
+    # 制約(9つ。すべて0以下であるべき)
     proportion_penalty: float  # 太さの破綻(0であるべき)
     thickness_order_margin: float  # リングがステムより太いか(0以下であるべき)
-    stem_plug_margin: float  # ステムが鼻栓の円柱内に収まっているか(0以下であるべき)
-    hoop_visibility_margin: float  # フープが皮膚より外に出て見えるか(0以下であるべき)
-    ring_clearance_margin: float  # リングのめり込み超過量(0以下であるべき)
+    hook_reach_margin: float  # リングとステムの間に最低限の隙間があるか(0以下であるべき)
+    stem_entry_margin: float  # ステムが鼻栓の露出面より下から入っているか(0以下であるべき)
+    hoop_visibility_margin: float  # フープが最低限皮膚より外に出ているか(0以下であるべき)
+    ring_clearance_margin: float  # リング表面と鼻表面の隙間が最低限あるか(0以下であるべき)
     stem_clearance_margin: float  # ステムのめり込み量(0以下であるべき)
     plug_insertion_margin: float  # ステムの刺さり込みが最小長さに足りているか(0以下であるべき)
     plug_overshoot_margin: float  # ステムが鼻栓を突き抜けていないか(0以下であるべき)
@@ -244,24 +243,19 @@ class FrameScore:
 # ごく小さな余裕(mm、または比率)
 _MARGIN_EPSILON = 1e-6
 
-# fit_gap_maxの許容値(mm)。鼻栓自体の直径(plug.diameterの既定値6.0mm)を
-# 「これ以上局所的に離れていたら明らかに顔から浮いて見える」の目安にする
-# (フレームが挟んでいる相手=鼻栓より大きく浮くのは不自然、という考え方)
-_FIT_GAP_MAX_THRESHOLD = 6.0
-
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
     """FrameScoreの9つの制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
 
-    すでに0以下が合格ラインの8項目は_MARGIN_EPSILONを引くだけ(境界の
-    誤差吸収)。fit_gap_maxは実際の閾値を引く。
+    いずれも0以下が合格ラインなので、_MARGIN_EPSILONを引くだけ(境界の
+    誤差吸収)。
     """
     return (
-        score.fit_gap_max - _FIT_GAP_MAX_THRESHOLD,
         score.proportion_penalty - _MARGIN_EPSILON,
         score.thickness_order_margin - _MARGIN_EPSILON,
-        score.stem_plug_margin - _MARGIN_EPSILON,
+        score.hook_reach_margin - _MARGIN_EPSILON,
+        score.stem_entry_margin - _MARGIN_EPSILON,
         score.hoop_visibility_margin - _MARGIN_EPSILON,
         score.ring_clearance_margin - _MARGIN_EPSILON,
         score.stem_clearance_margin - _MARGIN_EPSILON,
@@ -277,7 +271,7 @@ def evaluate_frame(
 
     frameに依存しない検証(validate_target_reach/validate_ring_height。
     PlugParams/NoseParamsにしか依存せず、GAの探索中は結果が変わらない)は
-    例外で即座に止める。frameに依存する検証(stem_plug_margin等)は例外で
+    例外で即座に止める。frameに依存する検証(hook_reach_margin等)は例外で
     止めず、制約値としてFrameScoreに含める(earrings.frame_model.pyの
     モジュールdocstring参照)。
     """
@@ -289,7 +283,7 @@ def evaluate_frame(
     ]
 
     max_thickness = plug.diameter * _MAX_THICKNESS_TO_PLUG_DIAMETER
-    fit_gap, fit_gap_max = _fit_gap(sides, body, frame.ring_thickness)
+    ring_length = _path_length(sides[0][0])
     contact_length = ring_contact_length(frame, sides[0][0], body)
 
     insertion_margins = [
@@ -302,15 +296,15 @@ def evaluate_frame(
     ]
 
     return FrameScore(
-        retention=_retention(frame),
-        pain=_pain(frame, contact_length),
-        fit_gap=fit_gap,
-        fit_gap_max=fit_gap_max,
+        retention=_retention(frame, ring_length),
+        pain=_pain(frame, ring_length, contact_length),
+        visibility=hoop_protrusion(params, body, sides),
         proportion_penalty=_proportion_penalty(
             sides, frame.stem_thickness, max_thickness
         ),
         thickness_order_margin=thickness_order_margin(frame),
-        stem_plug_margin=stem_plug_margin(frame, plug, params, sides),
+        hook_reach_margin=hook_reach_margin(frame, params, body),
+        stem_entry_margin=stem_entry_margin(frame, plug, params, body),
         hoop_visibility_margin=hoop_visibility_margin(params, body, sides),
         ring_clearance_margin=ring_clearance_margin(frame, sides, body),
         stem_clearance_margin=stem_clearance_margin(sides, body, frame.stem_thickness),

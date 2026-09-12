@@ -49,9 +49,9 @@ $ uv run python scripts/earrings/export_model.py
 $ uv run python scripts/earrings/view_nose.py
 
 # NSGA-IIでフレーム形状を最適化し、output/earrings/evolution.png に出力(パレートフロントは標準出力の表で確認)
-# --sort-by {retention,pain,fit_gap} で表の並び順を変えられる(ある目的に極振りした候補を先頭から拾う用)
+# --sort-by {retention,pain,visibility} で表の並び順を変えられる(ある目的に極振りした候補を先頭から拾う用)
 $ uv run python scripts/earrings/optimize.py
-$ uv run python scripts/earrings/optimize.py --sort-by fit_gap
+$ uv run python scripts/earrings/optimize.py --sort-by visibility
 
 # 上の表から選んだ行の6変数(ring_r ring_gap ring_t ring_d stem_len stem_t)をglTF(.glb)に出力
 # (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)

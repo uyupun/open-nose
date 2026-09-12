@@ -19,26 +19,39 @@ FrameParams.__post_init__が要求する下限(いずれも正の値であるこ
 そのまま使う。上限は物理的な基準が明示されていない変数が多く、以下の
 考え方で仮置きした(GAを実際に動かしながら見直す前提の暫定値):
 
-- ring_radius: リングの終端(鼻翼の皮膚に掛かる接触点)は固定で、半径と
-  隙間の角度から中心と内側の接点(=ステムの位置)が決まる(models.
-  frame_modelのモジュールdocstring「幾何」参照)ため、ステムが鼻栓の
-  円柱内に収まる(stem_plug_margin)半径の範囲は隙間の角度に依存する
-  (既定の隙間90度では約2〜5mm)。下限1.5mm・上限6.0mmは、その境界の
-  少し外側まで探索して境界形状を見誤らないようにした値
+- ring_radius: フックの大きな円弧が、鼻翼の皮膚に掛かる終端から鼻の下を
+  通って鼻栓の軸まで、最低限の隙間(_MIN_HOOK_GAP=3.0mm)を残して届く
+  (hook_reach_margin)には、半径が中心-軸間の水平距離を一定以上上回る
+  必要がある(earrings.frame_modelのモジュールdocstring「幾何」参照)。
+  下限4.0mmはこの境界の少し外側。上限は、以前10.0mmにしていたが、
+  visibility(フープの突き出し)が大きなフープを好むため上限付近に
+  張り付く個体が多く、鼻の幅に対してリングが大きすぎ、リングの内側に
+  鼻がぴったり収まって「めり込んで見える」という指摘を受けたため、
+  実物の鼻ピアスにより近いサイズ感になる8.0mmまで引き下げた
 - ring_gap_deg: 隙間は内側上方(鼻翼の壁が上へつながる場所)に開く。
-  終端の方向は180度-ring_gap_deg(90度で真上)。下限60度は、これより
-  狭いと終端が内側上方へ回り込みすぎて円弧が鼻翼の壁に突っ込む
-  (ring_clearance_margin違反)境界の少し外側。上限180度は、終端が
-  横端になり円弧が下半分だけの「J」字になる境界
+  円弧の始点(終端)の方向は180度-ring_gap_deg(90度で真上)。下限は
+  以前60度だったが、リングをよりコンパクトにする(円弧を短くする)よう
+  誘導するため75度まで引き上げた(60〜75度の範囲でも、これより狭いと
+  終端が内側上方へ回り込みすぎて円弧が鼻翼の壁に突っ込む
+  (ring_clearance_margin違反)境界の少し外側という関係は変わらない)。
+  上限180度は、終端が横端になり円弧が下半分だけの「J」字になる境界
 - ring_thickness: 下限0.8mm。上限2.5mmは、実際の鼻ピアスの線材の細さに
-  近づけるため、旧上限(5.0mm)から引き下げた。ring_radiusの上限(4.5mm)に
-  対してチューブの半径(ring_thickness/2)が太くなりすぎない範囲でもある
-- ring_depth: 下限0.1mm(クリップとして機能する最小限の押し込み)。上限
-  1.5mmは、リングが鼻翼の肉に深く埋没しすぎない範囲にした
-- stem_length: ステムはリングの内側の端(鼻孔の縁の少し上)から鼻栓の
-  軸方向へ伸びる。下限2.0mmは鼻栓に最低限刺さる長さ、上限10.0mmは
-  鼻栓の奥の端(plug.length=12.0mmの90%)を突き抜ける(plug_overshoot_
-  margin違反)境界の少し外側
+  近づけるため、旧上限(5.0mm)から引き下げた値
+- ring_depth: 以前は下限0.1mm(押し込みなしでは機能しないという考え方)
+  だったが、earrings.frame_model.ring_clearance_marginを線径に比例した
+  実測ベースの制約(_RING_EMBED_RATIO)に変更した後、押し込み量を増やして
+  も許容量自体は増えないため、太い線材でもring_depthをあまり大きくは
+  できなくなった(実測でring_thickness=2.5mmでもring_depth≈0.15mm程度が
+  上限)。下限-0.3mmは、線材が細い個体が押し込みなし(0)でも許容量を
+  超えてしまう場合に接触点を皮膚よりわずかに外側へ引く(負にする)ための
+  余地。上限1.5mmは、リングが鼻翼の肉に深く埋没しすぎない範囲にした
+  (据え置き。ただしring_clearance_marginの方が先に効くため、実際に
+  1.5近くまで使われることはない)
+- stem_length: ステムはフックの終点(小さな曲げの終わり、鼻栓の露出面
+  より下)から鼻栓の軸に沿って真上へ伸びる。下限6.0mmは鼻栓の下部から
+  刺さる分の余裕を見た最低限の長さ、上限16.0mmは鼻栓の奥の端
+  (plug.length=12.0mmの90%)を露出面からのステム開始位置(露出面より
+  下)を踏まえて突き抜ける(plug_overshoot_margin違反)境界の少し外側
 - stem_thickness: 下限0.5mm(針のように細すぎない程度)。上限2.0mmは、
   ring_thicknessの上限引き下げ(2.5mm)に合わせて調整した値で、
   thickness_order_margin(ring_thickness>stem_thickness)と矛盾しない
@@ -66,7 +79,7 @@ from pymoo.optimize import minimize  # noqa: E402
 
 from commons.nose_model import NoseParams, build_nose_body  # noqa: E402
 from commons.plug_model import PlugParams  # noqa: E402
-from commons.report import SORT_KEYS, plot_evolution, print_summary  # noqa: E402
+from commons.report import SortKeys, plot_evolution, print_summary  # noqa: E402
 from earrings.evaluation import constraint_values, evaluate_frame  # noqa: E402
 from earrings.export_model import OUTPUT_DIR  # noqa: E402
 from earrings.frame_model import (  # noqa: E402
@@ -79,30 +92,37 @@ from earrings.frame_model import (  # noqa: E402
 # FrameProblem._evaluateがFrameParamsを組み立てる)。根拠はモジュール
 # docstring参照
 _SEARCH_SPACE: list[tuple[str, float, float]] = [
-    ("ring_radius", 1.5, 6.0),
-    ("ring_gap_deg", 60.0, 180.0),
+    ("ring_radius", 4.0, 8.0),
+    ("ring_gap_deg", 75.0, 180.0),
     ("ring_thickness", 0.8, 2.5),
-    ("ring_depth", 0.1, 1.5),
-    ("stem_length", 2.0, 10.0),
+    ("ring_depth", -0.3, 1.5),
+    ("stem_length", 6.0, 16.0),
     ("stem_thickness", 0.5, 2.0),
 ]
 _VAR_NAMES = [name for name, _, _ in _SEARCH_SPACE]
 _XL = np.array([lo for _, lo, _ in _SEARCH_SPACE])
 _XU = np.array([hi for _, _, hi in _SEARCH_SPACE])
 
-# 目的(retention, pain, fit_gap)の符号。pymooは最小化のみ扱うため、
+# 目的(retention, pain, visibility)の符号。pymooは最小化のみ扱うため、
 # 最大化したいretentionだけ反転する(モジュールdocstring参照)。
 # commons/report.pyが表示用に符号を戻す際にも使うため、モジュール外に
 # 公開する(先頭にアンダースコアを付けない)
-OBJ_SIGN = np.array([-1.0, 1.0, 1.0])
+OBJ_SIGN = np.array([-1.0, 1.0, -1.0])
 
-# 目的の表示名(グラフの軸ラベル)。retention, pain, fit_gapの順で固定
+# 目的の表示名(グラフの軸ラベル)。retention, pain, visibilityの順で固定
 # (FrameProblem._evaluateが組み立てる順序と同じ)
 _OBJ_LABELS = [
     "retention (挟み力, 既定=1, 最大化)",
     "pain (圧力 = 挟み力/接触面積, 最小化)",
-    "fit_gap (mm, 最小化)",
+    "visibility (フープの突き出し mm, 最大化)",
 ]
+# print_summaryの並べ替え指定: 目的の名前 → (列番号, 大きい順か)。
+# OBJ_SIGN・_OBJ_LABELSと同じ順序・向き
+_SORT_KEYS: SortKeys = {
+    "retention": (0, True),
+    "pain": (1, False),
+    "visibility": (2, True),
+}
 # パレートフロントの表の(見出し, 表示幅)。_SEARCH_SPACEの変数順・目的順
 _X_COLUMNS = [
     ("ring_r", 7),
@@ -112,7 +132,7 @@ _X_COLUMNS = [
     ("stem_len", 9),
     ("stem_t", 7),
 ]
-_F_COLUMNS = [("retention", 11), ("pain", 8), ("fit_gap", 9)]
+_F_COLUMNS = [("retention", 11), ("pain", 8), ("visibility", 11)]
 
 
 class FrameProblem(Problem):
@@ -136,7 +156,7 @@ class FrameProblem(Problem):
         for i, row in enumerate(x):
             frame = FrameParams(**dict(zip(_VAR_NAMES, row)))
             score = evaluate_frame(frame, self.plug, self.nose)
-            objectives[i] = OBJ_SIGN * [score.retention, score.pain, score.fit_gap]
+            objectives[i] = OBJ_SIGN * [score.retention, score.pain, score.visibility]
             constraints[i] = constraint_values(score)
         out["F"] = objectives
         out["G"] = constraints
@@ -150,7 +170,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument(
         "--sort-by",
-        choices=sorted(SORT_KEYS),
+        choices=sorted(_SORT_KEYS),
         default="retention",
         help="パレートフロントの表をどの目的が良い順に並べるか(既定: retention)",
     )
@@ -183,7 +203,7 @@ def main() -> None:
     evolution_path = args.output_dir / "evolution.png"
     plot_evolution(generations, evolution_path, _OBJ_LABELS)
     print_summary(
-        res.X, pareto_f, n_feasible, n_total, _X_COLUMNS, _F_COLUMNS, sort_by=args.sort_by
+        res.X, pareto_f, n_feasible, n_total, _X_COLUMNS, _F_COLUMNS, _SORT_KEYS, args.sort_by
     )
     print(f"\n画像を出力: {evolution_path}")
 
