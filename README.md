@@ -20,7 +20,12 @@ scripts/
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
   spiral/      # ゼンマイ(渦巻き)型フレーム: 鼻翼の外側にぶら下がるコイル + 鼻栓に刺すステム
-    frame_model.py       # 形状(FrameParamsの5変数): 渦巻きのコイル + ステム
+    frame_model.py       # 形状(FrameParamsの6変数): 渦巻きのコイル + ステム
+    evaluation.py        # 評価関数(3目的 + 制約)
+    scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
+    optimize.py / export_model.py / export_frame.py / view_nose.py
+  dilator/     # 拡張ブリッジ型フレーム: 鼻腔拡張テープ(ブリーズライト等)のように小鼻を押し開くブリッジ + 鼻栓に刺すステム
+    frame_model.py       # 形状(FrameParamsの4変数): 小鼻を横断するブリッジ + 左右のステム(左右一体の1部品)
     evaluation.py        # 評価関数(3目的 + 制約)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
@@ -32,6 +37,7 @@ output/
   models/    # 元の設計の出力(base.glb, evolution.png, candidate_*.glb)
   earrings/  # 鼻ピアス型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame_{left,right}.stl)
   spiral/    # ゼンマイ型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame_{left,right}.stl)
+  dilator/   # 拡張ブリッジ型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame.stl)
 ```
 
 新しい設計を足すときは、`earrings/`と同じ構成(frame_model・evaluation・scene・各スクリプト)のフォルダを`scripts/`直下に作り、鼻本体・鼻栓・ビューア・レポートは`commons/`のものを使う。
@@ -86,17 +92,44 @@ $ uv run python scripts/spiral/view_nose.py
 $ uv run python scripts/spiral/optimize.py
 $ uv run python scripts/spiral/optimize.py --sort-by weight
 
-# 上の表から選んだ行の5変数(turns start_r end_r wire_t stem_len)をglTF(.glb)に出力
+# 上の表から選んだ行の6変数(turns start_r end_r coil_t stem_t stem_len)をglTF(.glb)に出力
 # (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
-$ uv run python scripts/spiral/export_frame.py --turns 2.17 --start-radius 7.99 --end-radius 1.16 --wire-thickness 0.50 --stem-length 7.83 --output-name candidate_balanced.glb
+$ uv run python scripts/spiral/export_frame.py --turns 0.73 --start-radius 7.42 --end-radius 2.95 --coil-thickness 1.80 --stem-thickness 0.58 --stem-length 8.06 --output-name candidate_balanced.glb
 
 # --stl を付けると、フレーム(左右)だけを3Dプリント用STLとしても書き出す
 # (output/spiral/<出力名>_frame_left.stl / _frame_right.stl、単位mm)
-$ uv run python scripts/spiral/export_frame.py --turns 2.17 --start-radius 7.99 --end-radius 1.16 --wire-thickness 0.50 --stem-length 7.83 --output-name candidate_balanced.glb --stl
+$ uv run python scripts/spiral/export_frame.py --turns 0.73 --start-radius 7.42 --end-radius 2.95 --coil-thickness 1.80 --stem-thickness 0.58 --stem-length 8.06 --output-name candidate_balanced.glb --stl
 
 # 出力した候補(glb)や、フレーム単体のSTLをインタラクティブビューアで確認
 $ uv run python scripts/spiral/view_nose.py output/spiral/candidate_balanced.glb
 $ uv run python scripts/spiral/view_nose.py output/spiral/candidate_balanced_frame_left.stl
+```
+
+### 拡張ブリッジ型(dilator)
+
+```bash
+# 鼻本体・鼻栓・フレームの既定構成一式を生成して output/dilator/base.glb に出力
+$ uv run python scripts/dilator/export_model.py
+
+# 生成した鼻モデルをインタラクティブビューアで確認(引数なしで既定形状)
+$ uv run python scripts/dilator/view_nose.py
+
+# NSGA-IIでフレーム形状を最適化し、output/dilator/evolution.png に出力(パレートフロントは標準出力の表で確認)
+# --sort-by {extension_force,pain,inconspicuousness} で表の並び順を変えられる(ある目的に極振りした候補を先頭から拾う用)
+$ uv run python scripts/dilator/optimize.py
+$ uv run python scripts/dilator/optimize.py --sort-by inconspicuousness
+
+# 上の表から選んだ行の4変数(nat_r bridge_t stem_t stem_len)をglTF(.glb)に出力
+# (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
+$ uv run python scripts/dilator/export_frame.py --natural-radius 45.57 --bridge-thickness 2.17 --stem-thickness 0.51 --stem-length 7.35 --output-name candidate_balanced.glb
+
+# --stl を付けると、フレーム単体(左右一体の1部品)を3Dプリント用STLとしても書き出す
+# (output/dilator/<出力名>_frame.stl、単位mm)
+$ uv run python scripts/dilator/export_frame.py --natural-radius 45.57 --bridge-thickness 2.17 --stem-thickness 0.51 --stem-length 7.35 --output-name candidate_balanced.glb --stl
+
+# 出力した候補(glb)や、フレーム単体のSTLをインタラクティブビューアで確認
+$ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced.glb
+$ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced_frame.stl
 ```
 
 ### 元の設計(アーム + コネクタ)
