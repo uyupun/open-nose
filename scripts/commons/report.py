@@ -24,12 +24,12 @@ matplotlib.rcParams["font.serif"] = ["Hiragino Mincho ProN"]
 # 判別できなくなるため、最初・最後を含む一部の世代だけ抽出する
 _EVOLUTION_SNAPSHOTS = 6
 
-# print_summaryの並べ替えに指定できる目的の名前と、fの列番号・並び順
-# (Trueなら大きい順=最大化目的)。「ある目的に極振りした候補」を表の先頭
-# から拾えるようにするためのもの。パレートフロントは目的ごとの極端を
-# 全て含んでいるので、極振りのために別途GAを回し直す必要はない。
-# 目的の順序(retention, pain, fit_gap)は各設計のoptimize.pyで共通
-SORT_KEYS = {"retention": (0, True), "pain": (1, False), "fit_gap": (2, False)}
+# print_summaryの並べ替え指定(sort_keys引数)の型: 目的の名前 → (fの列番号,
+# 大きい順に並べるか=最大化目的か)。「ある目的に極振りした候補」を表の
+# 先頭から拾えるようにするためのもの。パレートフロントは目的ごとの極端を
+# 全て含んでいるので、極振りのために別途GAを回し直す必要はない。目的の
+# 名前・向きは設計ごとに違うため、各設計のoptimize.pyが定義して渡す
+SortKeys = dict[str, tuple[int, bool]]
 
 
 def _sample_cmap(name: str, n: int) -> list[tuple[float, float, float]]:
@@ -79,14 +79,15 @@ def print_summary(
     n_total: int,
     x_columns: list[tuple[str, int]],
     f_columns: list[tuple[str, int]],
-    sort_by: str = "retention",
+    sort_keys: SortKeys,
+    sort_by: str,
 ) -> None:
     """最終世代の実行可能数と、パレートフロント全個体を表として表示する。
 
     xはパレートフロントの決定変数、fは対応する目的値(表示用)。x_columns/
     f_columnsは(見出し, 表示幅)のリストで、ヘッダーと各行のフォーマットを
     同じ定義から組み立てることで幅がずれて表が崩れることを防ぐ。sort_by
-    で指定した目的(SORT_KEYS参照)が良い順に並べる。
+    で指定した目的(sort_keys参照)が良い順に並べる。
     """
     print(f"\n最終世代: 実行可能 {n_feasible}/{n_total} 個体")
     print(f"パレートフロント: {len(f)} 個体\n")
@@ -96,7 +97,7 @@ def print_summary(
     print(header)
     print("-" * len(header))
 
-    column, descending = SORT_KEYS[sort_by]
+    column, descending = sort_keys[sort_by]
     order = np.argsort(-f[:, column] if descending else f[:, column])
     for i in order:
         row = "".join(f"{v:>{w}.2f}" for v, (_, w) in zip(x[i], x_columns))
