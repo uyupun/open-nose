@@ -1,7 +1,7 @@
 """NSGA-II(pymoo)によるゼンマイ型フレーム形状の多目的最適化スクリプト。
 
 evaluate_frame/constraint_values(scripts/spiral/evaluation.py)をpymooの
-Problemでラップし、FrameParamsの5設計変数を探索してパレートフロントを
+Problemでラップし、FrameParamsの6設計変数を探索してパレートフロントを
 求める。可視化・結果表示はcommons/report.py側の責務とし、このファイルは
 実行(FrameProblemの定義とminimize()の呼び出し)だけを持つ
 (earrings/optimize.pyと同じ構成)。
@@ -18,18 +18,37 @@ FrameParams.__post_init__が要求する下限(いずれも正の値であるこ
 考え方で仮置きした(GAを実際に動かしながら見直す前提の暫定値。
 scripts/spiral/frame_model.pyのモジュールdocstring「幾何」参照):
 
-- turns: 下限1.0(1周未満では「渦巻き」に見えない)。上限3.5は、
-  turns・start_radius・wire_thicknessが大きいほど経路長(=weight)が
-  増えるため、あまり大きくすると重さが支配的になり実用に耐えない
-  という考え方の暫定値
+- turns: 最初は下限1.0・上限3.5(turns・start_radius・coil_thicknessが
+  大きいほど経路長(=weight)が増えるため、あまり大きくすると重さが
+  支配的になり実用に耐えないという考え方だった)、ユーザー指摘「元の
+  添付画像くらい1周半くらいで」を受けて1.2〜1.8に狭め、続いて「もっと
+  渦巻き少なくていいや。半周くらいで」との指摘で0.4〜0.7に、さらに
+  「0.75周にできる?」との指摘で0.6〜0.9に調整した(0.75を範囲の中央に
+  し、GAに多少の探索の余地は残す)
 - start_radius: 下限3.0mm(渦の外径が小さすぎると見た目の主張が弱い)。
   上限8.0mmは、earrings.optimize.pyのring_radius上限と同じ理由
   (実物の鼻ピアスに近いサイズ感)
 - end_radius: 下限0.5mm(渦の中心が尖りすぎない最小限)。上限3.0mmは
   start_radius(上限8.0)に対してradius_order_margin
   (_MIN_RADIUS_DROP=1.0mm差)を満たす余地を残すための暫定値
-- wire_thickness: 下限0.5mm(針のように細すぎない程度)。上限2.0mmは
-  earrings.optimize.pyのstem_thicknessの上限と同じ考え方
+- coil_thickness: stem_thicknessと独立の変数に分けた(以前は共通の
+  wire_thickness、frame_model.pyのモジュールdocstring参照)。下限を
+  earrings.optimize.pyのring_thicknessと同じ0.8mmにしたところ、weight
+  (体積、最小化)しか太さに効く目的がないため、GAが下限付近(0.8〜0.9mm
+  程度)に張り付いてしまい、ユーザー指摘「評価後が細すぎる」の通りに
+  なった(earringsのring_thicknessはretention∝線径^4という「太いほど
+  有利」な目的があったため下限に張り付かなかった、という違い)。
+  visibility/turnsに太さは効かないため、この設計では下限を実際に見た目が
+  太いと感じられる水準まで引き上げるしかない。1.4mm(旧wire_thicknessの
+  既定値、earringsのring_thicknessの既定値でもある)を下限にしたが、
+  GAが常に下限付近に張り付く(=coil_thicknessに関して探索する意味が
+  ほぼない)ことは変わらないため、ユーザー指摘「もう少し太くできる?」を
+  受けて下限をさらに1.8mmへ引き上げた。上限2.5mmは変更なし
+  (earrings.optimize.pyのring_thicknessの上限=実際の鼻ピアスの線材の
+  太さの目安と同じ)
+- stem_thickness: earrings.optimize.pyのstem_thicknessと同じ根拠・同じ
+  範囲(下限0.5mm、上限2.0mmはcoil_thicknessの上限引き下げに合わせた
+  値で、thickness_order_marginと矛盾しない)
 - stem_length: earrings.optimize.pyのstem_lengthと同じ根拠(下限6.0mmは
   鼻栓の下部から刺さる分の余裕を見た最低限の長さ、上限16.0mmは鼻栓の
   奥の端を突き抜ける境界の少し外側)
@@ -56,7 +75,7 @@ from spiral.evaluation import constraint_values, evaluate_frame  # noqa: E402
 from spiral.export_model import OUTPUT_DIR  # noqa: E402
 from spiral.frame_model import (  # noqa: E402
     FrameParams,
-    validate_anchor_height,
+    validate_follow_height,
     validate_target_reach,
 )
 
@@ -64,10 +83,11 @@ from spiral.frame_model import (  # noqa: E402
 # FrameProblem._evaluateがFrameParamsを組み立てる)。根拠はモジュール
 # docstring参照
 _SEARCH_SPACE: list[tuple[str, float, float]] = [
-    ("turns", 1.0, 3.5),
+    ("turns", 0.6, 0.9),
     ("start_radius", 3.0, 8.0),
     ("end_radius", 0.5, 3.0),
-    ("wire_thickness", 0.5, 2.0),
+    ("coil_thickness", 1.8, 2.5),
+    ("stem_thickness", 0.5, 2.0),
     ("stem_length", 6.0, 16.0),
 ]
 _VAR_NAMES = [name for name, _, _ in _SEARCH_SPACE]
@@ -97,22 +117,23 @@ _X_COLUMNS = [
     ("turns", 7),
     ("start_r", 8),
     ("end_r", 7),
-    ("wire_t", 7),
+    ("coil_t", 7),
+    ("stem_t", 7),
     ("stem_len", 9),
 ]
 _F_COLUMNS = [("visibility", 11), ("weight", 9), ("turns", 7)]
 
 
 class FrameProblem(Problem):
-    """FrameParamsの5変数を探索するpymoo Problem。plug/noseは固定。"""
+    """FrameParamsの6変数を探索するpymoo Problem。plug/noseは固定。"""
 
     def __init__(self, plug: PlugParams, nose: NoseParams):
         # frameに依存しない検証(問題設定そのものの誤り)は、GAを回す前に
         # 一度だけ確認しておく(earrings/optimize.pyと同じ理由)
         validate_target_reach(plug, nose)
-        validate_anchor_height(nose, build_nose_body(nose))
+        validate_follow_height(nose, build_nose_body(nose))
 
-        super().__init__(n_var=5, n_obj=3, n_ieq_constr=5, xl=_XL, xu=_XU)
+        super().__init__(n_var=6, n_obj=3, n_ieq_constr=6, xl=_XL, xu=_XU)
         self.plug = plug
         self.nose = nose
 
