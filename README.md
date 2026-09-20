@@ -24,8 +24,8 @@ scripts/
     evaluation.py        # 評価関数(3目的 + 制約)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
-  dilator/     # 拡張ブリッジ型フレーム: 鼻腔拡張テープ(ブリーズライト等)のように小鼻を押し開くブリッジ + 鼻栓に刺すステム
-    frame_model.py       # 形状(FrameParamsの4変数): 小鼻を横断するブリッジ + 左右のステム(左右一体の1部品)
+  dilator/     # 拡張ブリッジ型フレーム: 鼻腔拡張テープ(ブリーズライト等)のように鼻を押し開く平らなブリッジ + 鼻栓を受け入れる筒
+    frame_model.py       # 形状(FrameParamsの6変数): 鼻筋を横断する平らなブリッジ + 左右の棒(鼻の側面に沿って鼻孔まで約26mm) + 左右のレンズ(筒)(印刷・装着しやすいよう、ジョイントマット状のタブ/スロットで嵌め込む3部品構成)
     evaluation.py        # 評価関数(3目的 + 制約)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
@@ -37,7 +37,7 @@ output/
   models/    # 元の設計の出力(base.glb, evolution.png, candidate_*.glb)
   earrings/  # 鼻ピアス型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame_{left,right}.stl)
   spiral/    # ゼンマイ型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame_{left,right}.stl)
-  dilator/   # 拡張ブリッジ型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame.stl)
+  dilator/   # 拡張ブリッジ型の出力(base.glb, evolution.png, candidate_*.glb, 印刷用 *_frame_bridge.stl / *_frame_leg_left.stl / *_frame_leg_right.stl)
 ```
 
 新しい設計を足すときは、`earrings/`と同じ構成(frame_model・evaluation・scene・各スクリプト)のフォルダを`scripts/`直下に作り、鼻本体・鼻栓・ビューア・レポートは`commons/`のものを使う。
@@ -119,17 +119,25 @@ $ uv run python scripts/dilator/view_nose.py
 $ uv run python scripts/dilator/optimize.py
 $ uv run python scripts/dilator/optimize.py --sort-by inconspicuousness
 
-# 上の表から選んだ行の4変数(nat_r bridge_t stem_t stem_len)をglTF(.glb)に出力
+# 上の表から選んだ行の6変数(nat_r bridge_w bridge_t leg_t collar_l tab_ovsz)をglTF(.glb)に出力
 # (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
-$ uv run python scripts/dilator/export_frame.py --natural-radius 45.57 --bridge-thickness 2.17 --stem-thickness 0.51 --stem-length 7.35 --output-name candidate_balanced.glb
+$ uv run python scripts/dilator/export_frame.py --natural-radius 99.77 --bridge-width 4.99 --bridge-thickness 3.02 --leg-thickness 2.98 --collar-length 2.00 --tab-head-oversize 0.51 --output-name candidate_balanced.glb
 
-# --stl を付けると、フレーム単体(左右一体の1部品)を3Dプリント用STLとしても書き出す
-# (output/dilator/<出力名>_frame.stl、単位mm)
-$ uv run python scripts/dilator/export_frame.py --natural-radius 45.57 --bridge-thickness 2.17 --stem-thickness 0.51 --stem-length 7.35 --output-name candidate_balanced.glb --stl
+# --stl を付けると、フレームを3Dプリント用STLとしても書き出す。印刷しやすい
+# ように、ブリッジ(鼻筋のアーチ状)・左の脚(棒とレンズ)・右の脚(棒とレンズ)
+# の3つの別々のファイルになる(output/dilator/<出力名>_frame_bridge.stl・
+# _frame_leg_left.stl・_frame_leg_right.stl、単位mm)。それぞれ別々に
+# プリントし、脚側のタブ(矢じり形)をブリッジ側のスロット(帯の下縁の
+# 切り欠き)へ、帯の面に対して垂直に押し込んで組み立てる(ジョイント
+# マットと同じ嵌め込み)。タブの首より頭が左右へ張り出している
+# (tab_head_oversize)ため、棒の向きにも帯に沿った向きにも抜けない。
+# スロットの入口は段付きの面取り(リードイン)になっていて、細かい
+# 印刷で寸法が多少太っても頭が入口に噛まずに押し込める
+$ uv run python scripts/dilator/export_frame.py --natural-radius 99.77 --bridge-width 4.99 --bridge-thickness 3.02 --leg-thickness 2.98 --collar-length 2.00 --tab-head-oversize 0.51 --output-name candidate_balanced.glb --stl
 
-# 出力した候補(glb)や、フレーム単体のSTLをインタラクティブビューアで確認
+# 出力した候補(glb)や、部品単体のSTLをインタラクティブビューアで確認
 $ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced.glb
-$ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced_frame.stl
+$ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced_frame_bridge.stl
 ```
 
 ### 元の設計(アーム + コネクタ)

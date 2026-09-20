@@ -40,7 +40,10 @@ class PlugParams:
     同様、暫定値でGAを実際に動かしながら見直す前提。
     """
 
-    diameter: float = 6.0
+    # 実際に使っている鼻栓(丸めたティッシュ)の実測に合わせて6.0mmから
+    # 広げた(ユーザー申告: だいたい10mm)。NoseParams.nostril_b・
+    # nostril_gapもこれに合わせて広げてある
+    diameter: float = 10.0
     length: float = 12.0
 
     def __post_init__(self) -> None:

@@ -61,14 +61,18 @@ _ALAE_BUMP_SPAN = 6.96
 # _BACK_DEPTHやbridge/tip_depth_frontが指すz軸方向の「奥行き」とは別の軸
 # なので注意)の半径を、短径(nostril_b)の何倍にするか。浅い皿状のくぼみに
 # ならないよう、実際の穴らしい深さを持たせる
-_NOSTRIL_DEPTH_RATIO = 2.0
+_NOSTRIL_DEPTH_RATIO = 1.4
 # 鼻孔断面(三角形)の奥行き(z)方向における鼻孔の中心位置を、断面のz範囲
 # ([-_BACK_DEPTH, tip_depth_front])に対する比率で指定。0は背面、1は前面。
 # 前面(1)に寄せすぎると断面が先細りして側面からはみ出し、背面(0)に
-# 寄せすぎると背面から突き抜けるため、前後の隙間が均等になる中間に
-# 置いている。_BACK_DEPTHやtip_depth_frontを変更しても追従するよう、
-# 絶対値ではなく比率で持つ
-_NOSTRIL_Z_RATIO = 0.5
+# 寄せすぎると背面から突き抜ける。_BACK_DEPTHやtip_depth_frontを変更
+# しても追従するよう、絶対値ではなく比率で持つ。中間(0.5)に置いて
+# いたが、断面は前面へ向かって細くなる三角形なので、中間だと鼻孔
+# (と、そこへ差す直径10mmの鼻栓)が前面側の斜めの辺に近づきすぎる
+# (実測: 鼻孔位置に入る円の半径が3.1mmしかなく、鼻栓が鼻の側面を
+# 突き抜けていた)。0.35へ後ろ寄りにして余裕を作っている
+# (同条件で5.5mm。鼻孔は実際にも鼻の底面側にある)
+_NOSTRIL_Z_RATIO = 0.35
 
 
 @dataclass(frozen=True)
@@ -82,11 +86,22 @@ class NoseParams:
     bridge_w: float = 23.2
     bridge_depth_front: float = 2.1
     tip_w: float = 34.8
-    tip_depth_front: float = 12.0
+    # 鼻先の前面への迫り出し(顔の面からの突出)。12.0mmにしていたが、
+    # 実際の鼻の突出(20mm前後)より浅く、鼻孔位置の断面が薄くて直径
+    # 10mmの鼻栓が収まらなかった(鼻栓が鼻の側面から飛び出し、棒が
+    # そこと交差して「棒が鼻にめり込んで見える」原因になっていた)。
+    # 18.0mmへ深くしている(_tip_bumpの隆起が加わるので鼻先では約23mm)
+    tip_depth_front: float = 18.0
     nose_len: float = 52.2
-    nostril_a: float = 5.6
-    nostril_b: float = 3.2
-    nostril_gap: float = 8.5
+    # 鼻孔の寸法・間隔は、実際に鼻栓(丸めたティッシュ、直径約10mm)を
+    # 使っているユーザーから「レンズの穴が狭くて鼻栓がはまらない」という
+    # 指摘を受けて見直した。以前は鼻孔が13.6mm×6.4mm・中心間8.5mmで、
+    # 直径10mmの鼻栓が入らないうえ、鼻栓を囲む筒(dilator.frame_model.
+    # CollarGeometry)を左右に並べる余地(中心間=外径の2倍以上)が
+    # まったく残らなかった。13.0mm×10.4mm・中心間14.0mmへ広げている
+    nostril_a: float = 6.5
+    nostril_b: float = 4.5
+    nostril_gap: float = 14.0
     nostril_tilt_deg: float = 55.0
 
     def __post_init__(self) -> None:

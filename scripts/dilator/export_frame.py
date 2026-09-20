@@ -1,4 +1,4 @@
-"""NSGA-IIの候補(拡張ブリッジ型FrameParamsの4変数)を鼻モデルと組み合わせて
+"""NSGA-IIの候補(拡張ブリッジ型FrameParamsの6変数)を鼻モデルと組み合わせて
 glTF(.glb)に出力するスクリプト。
 
 FrameParamsの各フィールドに対応するCLI引数で候補フレームを指定する。省略すると既定
@@ -12,10 +12,14 @@ FrameParamsの各フィールドに対応するCLI引数で候補フレームを
 (dilator.frame_model._FRAME_COLORのdocstring参照)。
 
 --stlを付けると、鼻本体・鼻栓を含まないフレーム単体を3Dプリント用のSTL
-としても書き出す(<出力名>_frame.stl)。earrings/spiralと異なり左右一体の
-単一メッシュ(dilator.frame_model.build_frame参照)なので、STLも1ファイル
-になる。STLは色を持たないため寸法だけの出力で、単位はmm(スライサー側で
-mmとして読み込むこと)。
+としても書き出す。フレームはブリッジ(鼻頭のアーチ状)・左の脚(棒と
+レンズ)・右の脚(棒とレンズ)の3つの別々の部品(dilator.frame_model.
+build_bridge_piece/build_leg_piece)なので、STLも3ファイル
+(<出力名>_frame_bridge.stl・_frame_leg_left.stl・_frame_leg_right.stl)
+になる。それぞれ別々に3Dプリントし、脚側のタブ(矢じり形)をブリッジ側の
+スロット(帯の下縁の切り欠き)へ、帯の面の法線方向から押し込んで組み立てる
+(ジョイントマットと同じ嵌め込み)。STLは色を持たないため寸法だけの
+出力で、単位はmm(スライサー側でmmとして読み込むこと)。
 """
 
 import argparse
@@ -67,14 +71,15 @@ def main() -> None:
         print(f"  {geom_name}: {len(geom.vertices)} verts, {len(geom.faces)} faces")
 
     if args.stl:
-        mesh = scene.geometry["frame"]
-        stl_path = OUTPUT_DIR / f"{out_path.stem}_frame.stl"
-        mesh.export(stl_path)
-        x, y, z = mesh.extents
-        print(
-            f"exported: {stl_path} (watertight={mesh.is_watertight}, "
-            f"{x:.1f} x {y:.1f} x {z:.1f} mm, {mesh.volume:.1f} mm^3)"
-        )
+        for geom_name in ("frame_bridge", "frame_leg_left", "frame_leg_right"):
+            mesh = scene.geometry[geom_name]
+            stl_path = OUTPUT_DIR / f"{out_path.stem}_{geom_name}.stl"
+            mesh.export(stl_path)
+            x, y, z = mesh.extents
+            print(
+                f"exported: {stl_path} (watertight={mesh.is_watertight}, "
+                f"{x:.1f} x {y:.1f} x {z:.1f} mm, {mesh.volume:.1f} mm^3)"
+            )
 
 
 if __name__ == "__main__":

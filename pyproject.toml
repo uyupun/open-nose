@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "manifold3d>=3.5.2",
     "matplotlib>=3.10.0",
+    "networkx>=3.6.1",
     "numpy>=2.5.2",
     "pyglet<2",
     "pymoo>=0.6.1.5",
