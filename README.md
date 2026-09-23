@@ -25,8 +25,8 @@ scripts/
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
   dilator/     # 拡張ブリッジ型フレーム: 鼻腔拡張テープ(ブリーズライト等)のように鼻を押し開く平らなブリッジ + 鼻栓を受け入れる筒
-    frame_model.py       # 形状(FrameParamsの6変数): 鼻筋を横断する平らなブリッジ + 左右の棒(鼻の側面に沿って鼻孔まで約26mm) + 左右のレンズ(筒)(印刷・装着しやすいよう、ジョイントマット状のタブ/スロットで嵌め込む3部品構成)
-    evaluation.py        # 評価関数(3目的 + 制約)
+    frame_model.py       # 形状(FrameParamsの8変数): 鼻を横断する平らな薄いブリッジ(両端は両面テープの貼り代、連結部だけ厚いパッド) + 左右の棒(鼻の側面に沿って鼻孔まで) + 左右のレンズ(筒)(印刷・装着しやすいよう、ジョイントマット状のタブ/スロットで嵌め込む3部品構成)
+    evaluation.py        # 評価関数(3目的: 拡張力・鼻栓の保持剛性・目立たなさ + 制約14個)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
   models/      # 元の設計: 鼻中隔付近のアーム + 鼻栓へ向かうコネクタ(両鼻を同時に挟む)
@@ -115,13 +115,13 @@ $ uv run python scripts/dilator/export_model.py
 $ uv run python scripts/dilator/view_nose.py
 
 # NSGA-IIでフレーム形状を最適化し、output/dilator/evolution.png に出力(パレートフロントは標準出力の表で確認)
-# --sort-by {extension_force,pain,inconspicuousness} で表の並び順を変えられる(ある目的に極振りした候補を先頭から拾う用)
+# --sort-by {extension_force,plug_hold,inconspicuousness} で表の並び順を変えられる(ある目的に極振りした候補を先頭から拾う用)
 $ uv run python scripts/dilator/optimize.py
-$ uv run python scripts/dilator/optimize.py --sort-by inconspicuousness
+$ uv run python scripts/dilator/optimize.py --sort-by plug_hold
 
-# 上の表から選んだ行の6変数(nat_r bridge_w bridge_t leg_t collar_l tab_ovsz)をglTF(.glb)に出力
+# 上の表から選んだ行の8変数(nat_r tab_pos bridge_y bridge_w bridge_t leg_t collar_l tab_ovsz)をglTF(.glb)に出力
 # (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
-$ uv run python scripts/dilator/export_frame.py --natural-radius 99.77 --bridge-width 4.99 --bridge-thickness 3.02 --leg-thickness 2.98 --collar-length 2.00 --tab-head-oversize 0.51 --output-name candidate_balanced.glb
+$ uv run python scripts/dilator/export_frame.py --natural-radius 67.92 --tab-side-ratio 0.95 --bridge-y 10.15 --bridge-width 4.03 --bridge-thickness 1.32 --leg-thickness 2.95 --collar-length 2.01 --tab-head-oversize 0.50 --output-name candidate_balanced.glb
 
 # --stl を付けると、フレームを3Dプリント用STLとしても書き出す。印刷しやすい
 # ように、ブリッジ(鼻筋のアーチ状)・左の脚(棒とレンズ)・右の脚(棒とレンズ)
@@ -132,8 +132,12 @@ $ uv run python scripts/dilator/export_frame.py --natural-radius 99.77 --bridge-
 # マットと同じ嵌め込み)。タブの首より頭が左右へ張り出している
 # (tab_head_oversize)ため、棒の向きにも帯に沿った向きにも抜けない。
 # スロットの入口は段付きの面取り(リードイン)になっていて、細かい
-# 印刷で寸法が多少太っても頭が入口に噛まずに押し込める
-$ uv run python scripts/dilator/export_frame.py --natural-radius 99.77 --bridge-width 4.99 --bridge-thickness 3.02 --leg-thickness 2.98 --collar-length 2.00 --tab-head-oversize 0.51 --output-name candidate_balanced.glb --stl
+# 印刷で寸法が多少太っても頭が入口に噛まずに押し込める。ブリッジは
+# 薄い帯(1mm前後)で、連結部のまわりだけ厚いパッド(2.4mm)になっている。
+# 帯はその連結部よりさらに外側(鼻の側面)まで伸ばしてあり、左右の端の
+# 肌側の面に医療用両面テープを貼ると、ブリーズライトのように小鼻を
+# 引き上げられる
+$ uv run python scripts/dilator/export_frame.py --natural-radius 67.92 --tab-side-ratio 0.95 --bridge-y 10.15 --bridge-width 4.03 --bridge-thickness 1.32 --leg-thickness 2.95 --collar-length 2.01 --tab-head-oversize 0.50 --output-name candidate_balanced.glb --stl
 
 # 出力した候補(glb)や、部品単体のSTLをインタラクティブビューアで確認
 $ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced.glb

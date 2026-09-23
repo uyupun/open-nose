@@ -10,51 +10,45 @@ frame_model.build_bridge_piece/build_leg_pieceが作るメッシュを経由せ�
 earrings/spiral.evaluation.pyと同じ方針(本質的なトレードオフだけを
 目的とし、残りは制約として0以下判定にする)を踏襲する。ただしこの設計は
 「デザイン重視から機能面重視に」というユーザー方針のもと、目的の中身が
-大きく変わる:
+大きく変わる。
 
-- **目的(3つ、NSGA-IIが探索するトレードオフ)**: extension_force(機能性、
-  鼻腔を広げる拡張力、最大化)・pain(快適さ、皮膚にかかる圧力、最小化)・
-  inconspicuousness(意匠性、目立たなさ、最大化)。earrings/spiralの
-  visibility(目立つほど良い、意匠として主張する)とは正反対の方向を
-  最大化する点が、この設計の最大の特徴(ユーザー指定: 「目立たなさ」を
-  重視)
-- **制約(10個)**: curvature_margin・bridge_clearance_margin・
-  leg_clearance_margin・collar_clearance_margin・collar_position_margin・
-  lens_protrusion_margin・rod_thickness_margin・tab_fit_margin・
-  tab_thickness_margin・tab_retention_margin(FrameScore参照)。実際の閾値はいずれも暫定値で、NSGA-IIを実際に
-  動かしながら見直す前提。
+**目的(3つ、NSGA-IIが探索するトレードオフ。いずれも最大化)**
 
-後半の3つは、ユーザーが実機のレンダリング(view_nose.pyでSTLを開いた
-スクリーンショット)で指摘した2点、
-(1)「レンズ(鼻栓を差し込む筒)から棒がはみ出ている」
-(2)「ジョイントマットのような嵌め込む構造になっていない」
-への対応として新設した。形状そのもの(frame_model)を作り直したうえで、
-「作り方を変えたから大丈夫」で終わらせず、実際の寸法から毎回検証する:
+1. extension_force: 両端を両面テープで貼った帯が小鼻を広げる力
+2. plug_hold: 棒とレンズが鼻栓を保持する剛性
+3. inconspicuousness: 目立たなさ(正面から見た投影面積の符号反転)。
+   earrings/spiralのvisibility(目立つほど良い、意匠として主張する)とは
+   正反対の方向を最大化する点が、この設計の特徴(ユーザー指定)
 
-- lens_protrusion_margin: 棒の各点の球が、レンズの下端より下に出ていない
-  か・レンズの内径(鼻栓の空間)に入っていないかを、実際の中心線と点ごとの
-  半径から測る(frame_model.lens_protrusion_margin参照)
-- tab_fit_margin: 嵌め込みのスロットが、帯(ブリッジ)の幅・直線部分の
-  中に、周りに必要な肉(_TAB_MIN_WALL)を残して収まるか
-- tab_thickness_margin: タブ(帯と同じ厚み)が、嵌め込みの曲げに耐える
-  最小の厚み(_MIN_TAB_THICKNESS)を満たすか
+以前はpain(圧力=拡張力/接触面積)を2つ目の目的にしていたが、接触面積も
+拡張力も同じようにbridge_widthに比例するため、painは実質的に
+extension_forceの定数倍(実測の相関+0.99)で、パレートフロントが3次元
+空間の1本の直線に退化していた。面圧はskin_pressure_margin(制約)へ移し、
+代わりに棒・レンズの役割(鼻栓の保持)をplug_holdとして目的に据えた。
+実測の相関はextension_force-plug_hold −0.37、extension_force-
+inconspicuousness −0.19、plug_hold-inconspicuousness +0.06で、3つとも
+独立した軸として働いている。
 
-さらに、実際に印刷したユーザーからの「レンズと棒をもう少し太く(印刷
-できない)」「連結部も細かい印刷で確実に」という指摘を受けて2つ追加した:
+**制約(14個。FrameScore参照。すべて0以下であるべき)**
 
-- rod_thickness_margin: 棒の最も細いところ(レンズへ溶け込む区間)の直径が
-  印刷に必要な最小値(_MIN_ROD_DIAMETER)以上か。collar_lengthが小さいほど
-  細くなるため、GAが極端に薄いレンズを選ばないよう誘導する
-- tab_retention_margin: 嵌め込みの「返し」の引っかかり(tab_head_oversize
-  からはめあいの隙間_TAB_CLEARANCEを引いた残り)が最小値
-  (_MIN_TAB_RETENTION)以上か。隙間を広げた分、返しも大きくしないと
-  抜けてしまうため
+探索範囲(dilator/optimize._SEARCH_SPACE)からランダムに400件を評価した
+ときの違反率(=GAの探索で実際に効いている度合い):
 
-FrameParamsにはこの他tab_head_oversize(タブの矢じりの張り出し量、抜け
-止めの引っかかり)があるが、目的には現れない(抜け止めの効き自体は
-探索範囲の選び方で保証し、寸法として収まるかはtab_fit_marginが見る)。
+- 形が成立するかを決める、実際に効く制約: joint_access_margin(連結部が
+  鼻の正面に寄りすぎていないか。ユーザー指摘「メガネをしていると付け
+  づらそう」)・collar_clearance_margin 34.0%・
+  rod_thickness_margin 31.8%・tab_retention_margin 19.5%・
+  tape_area_margin 17.2%・rod_kink_margin 5.8%・skin_pressure_margin 5.8%・
+  tab_fit_margin 3.8%・leg_clearance_margin 2.8%・curvature_margin 0.2%
+- 安全網(この探索範囲では違反しないが、幾何の作り方を変えたときに
+  退行を検出する): bridge_clearance_margin・collar_position_margin・
+  lens_protrusion_margin・tab_thickness_margin。前の2つの改修では、この
+  種の制約が実際に「棒がレンズの穴を塞ぐ」「棒が0.4mmまで潰れる」と
+  いった退行を捕まえている
 
-## extension_force(拡張力)とpain(圧力)の構成
+閾値はいずれも暫定値で、実際に印刷・装着しながら見直す前提。
+
+## extension_force(拡張力)と skin_pressure(面圧)の構成
 
 実際の鼻腔拡張テープと同じ「平らな板ばねを鼻の丸みに合わせて曲げる」
 原理を、frame_model.bridge_curvatureが測る実際の曲率半径(actual_radius)
@@ -71,22 +65,50 @@ FrameParamsにはこの他tab_head_oversize(タブの矢じりの張り出し量
   逆向きの力になってしまうため、0にクランプする(curvature_marginが
   制約としてこれを弾くので、実行可能な個体では常に正になるはずだが、
   念のため)
-- **帯だけでなく棒も直列のバネとして数える**(_rod_stiffness)。鼻腔を
-  実際に広げるのは、帯が曲げ戻ろうとする力が棒→レンズ→鼻栓と伝わった
-  先の成分であり、棒が細ければそこでたわんで力が逃げる。棒は約42mmと
-  帯(約19mm)より長いため、実測ではこちらが律速になる。左右2本は並列、
-  その合計と帯が直列: 1/k = 1/k_帯 + 1/k_棒2本。
-  これを入れる前は、目的3つがいずれもbridge_thicknessのほぼ一次従属に
-  なっていて(実測: force-pain相関+0.99、thickness-inconspicuousness
-  相関-1.00)、パレートフロントが3次元空間の1本の直線に退化していた
-  (output/dilator/evolution.png)。leg_thicknessを含む3変数が目的に
-  一切現れていなかったのが原因で、棒を直列バネにすることで、太さ・長さが
-  拡張力に効くようになる
-- **pain = 圧力 ∝ 拡張力 / 接触面積**。接触面積は「ブリッジが実際に
-  鼻に触れている面の面積」。ブリッジは長方形断面のリボンで、鼻表面に
-  接する面はその幅(bridge_width)側の広い面のため、接触面積は
-  経路長(path_length)×bridge_widthで近似する(以前の円形断面時代は
-  bridge_thicknessを使っていたが、リボンの接触面はwidth側のため変更)
+- **外を向いている貼り代の面だけが効く**(frame_model.tape_outward_ratio)。
+  帯が曲げ戻る力のうち小鼻を開くのに使えるのは外向き(+x)の成分だけで、
+  鼻の背面側へ回り込んだ貼り代は後ろ向きに引くだけで鼻腔を広げない
+  (ユーザー指摘「アーチの両端が曲がりすぎている。ブリーズライトのように
+  鼻腔を広げる役割にならないといけない」)。貼り代の各区間の外向き法線の
+  x成分の平均を拡張力に掛ける。形状の側でも、法線のx成分が
+  _MIN_TAPE_NORMAL_Xを下回るところで貼り代を打ち切っている
+- **力を出すのは帯だけ**。以前は帯と棒を直列バネとして数えていたが、
+  これはアーチが鼻に直接乗って棒から鼻栓へ力を伝える前提の式だった。
+  両端を両面テープで貼る構造(ユーザー要望)に変わってからは、小鼻を
+  広げる力はテープで固定された帯そのものが出し、棒とレンズはそこから
+  ぶら下がって鼻栓を保持する部品なので、直列バネの経路に入らない。
+  帯を1mm前後まで薄くした結果、剛性は棒(実測20.9)より帯(同0.483)が
+  はるかに低く、直列にすると値がほぼ帯だけで決まるのに棒の寄与が
+  あるように見える、という誤解を招く状態にもなっていた
+- **装着位置(frame.bridge_y)が拡張力を左右する**。actual_radiusも
+  path_lengthも、帯を鼻のどの高さに貼るかで変わる(鼻筋側ほど断面が
+  細く平ら)。以前は装着位置が定数で、この2つがframeに依存しない
+  =GAから見て定数だったため、拡張力は実質bridge_thicknessだけの関数に
+  なっていた。bridge_yを探索変数にしたことで、装着位置そのものも
+  最適化の対象になる
+- **skin_pressure(面圧、制約)= 拡張力 / 貼り代の面積**。テープを貼る
+  面(frame_model.tape_pad_area、連結部より外側の帯の両端)にかかる面圧。
+  上限(_MAX_SKIN_PRESSURE)を超えると、痛みの前にテープが剥がれて力が
+  肌へ伝わらない。以前はこれをpainとして目的にしていたが、拡張力・
+  接触面積がどちらもbridge_widthに比例して約分され、実質extension_force
+  の定数倍(相関+0.99)にしかならなかったため、制約へ移した
+
+## plug_hold(鼻栓の保持剛性)の構成
+
+plug_hold = 左右の棒を「タブ側が固定端・レンズ側が荷重点の片持ち梁」と
+みなしたバネ定数の合計(_plug_hold・_rod_stiffness)。棒は太さが場所
+ごとに変わる(frame_model._rod_radii)ため、一様断面の公式ではなく
+カスティリアノの定理 δ/P = ∫ x^2/(E I(x)) dx を点列の上で数値積分して
+その逆数を取る。
+
+棒が柔らかいとレンズが振られて鼻栓がぐらつく。太く短い棒ほど高いが、
+そのぶん目立つ(inconspicuousness)ので、leg_thicknessと装着位置
+(bridge_y、棒の長さを決める)に本質的なトレードオフができる。実測の
+相関はleg_thickness +0.67、bridge_y -0.74。
+
+この積分は固定端(タブの首)側の細さに強く効く。タブの首の中では棒は
+連結部の厚み(_tab_pad_thickness)までしか太くできないため、「帯を薄く
+してもパッドで連結部だけ厚くする」という形の効果もここに現れる。
 
 ## inconspicuousness(目立たなさ)の構成
 
@@ -100,9 +122,13 @@ inconspicuousness = -(顔の正面から見たフレームの投影面積mm^2)
 相関-1.000)にすぎず、実際にはいちばん目立つ「鼻の側面を約42mm下る棒」と
 「鼻孔のレンズ」が評価に全く入らないうえ、bridge_widthも目的に現れない
 ためGAが常に探索範囲の上限へ張り付いていた(パレートフロントの全個体が
-bridge_width≈上限)。投影面積にすることで、bridge_width・leg_thickness・
-collar_lengthが「太く/長くすれば拡張力は上がるが目立つ」という本来の
-トレードオフとして効くようになる。
+bridge_width≈上限)。投影面積にすることで、bridge_width(実測相関-0.39)・
+leg_thickness(-0.64)・bridge_y(-0.64、高い位置ほど棒が長くなる)が
+「太く/長くすれば機能は上がるが目立つ」という本来のトレードオフとして
+効くようになる。なおcollar_lengthだけは目的にほとんど現れず(±0.06)、
+rod_thickness_margin・collar_clearance_marginという制約が実質的に
+値を決めている(レンズの厚みは棒の最細部の太さと、鼻栓の露出部に
+収まるかで決まる、はめあい寸法のため)。
 """
 
 from dataclasses import dataclass
@@ -118,12 +144,17 @@ from dilator.frame_model import (
     bridge_clearance_margin,
     bridge_curvature,
     bridge_points,
+    tape_area_margin,
+    tape_outward_ratio,
+    tape_pad_area,
     build_paths,
     collar_clearance_margin,
     collar_position_margin,
     curvature_margin,
+    joint_access_margin,
     leg_clearance_margin,
     lens_protrusion_margin,
+    rod_kink_margin,
     rod_thickness_margin,
     tab_fit_margin,
     tab_retention_margin,
@@ -141,6 +172,12 @@ _REF_BRIDGE_LENGTH = 23.5
 _REF_STIFFNESS = (
     _REF_BRIDGE_WIDTH * _REF_BRIDGE_THICKNESS**3 / 12
 ) / _REF_BRIDGE_LENGTH**3
+# 貼り代にかかってよい面圧の上限(extension_forceと同じ正規化での値を
+# 面積mm^2で割ったもの)。これを超えると、痛い前に両面テープが剥がれて
+# 拡張力が肌へ伝わらない(どちらも同じ面圧で決まるので1つの制約にして
+# いる)。探索範囲の中で実際に効く(=硬すぎる帯を弾く)水準に置いた
+# 暫定値で、テープの実物の保持力(N/cm^2)で置き換える前提
+_MAX_SKIN_PRESSURE = 0.0015
 
 
 def _rod_stiffness(rod: RodPath) -> float:
@@ -169,20 +206,40 @@ def _rod_stiffness(rod: RodPath) -> float:
 
 
 def _extension_force(
-    frame: FrameParams, actual_radius: float, path_length: float, rods: list[RodPath]
+    frame: FrameParams,
+    params: NoseParams,
+    actual_radius: float,
+    path_length: float,
 ) -> float:
-    """拡張力(機能性、最大化)の代理指標(バネ剛性×たわみ、基準の帯で
-    剛性1に正規化)。モジュールdocstring「extension_force(拡張力)と
-    pain(圧力)の構成」参照。extension_force・painの両方から参照される。
+    """拡張力(機能性、最大化)の代理指標(帯のバネ剛性×たわみ、基準の帯で
+    剛性1に正規化)。モジュールdocstring「extension_force(拡張力)の構成」
+    参照。
+
+    小鼻を広げる力を出すのは、両端を両面テープで肌に貼った帯そのもの
+    (曲げ戻ろうとする板ばね)。棒とレンズはそこからぶら下がって鼻栓を
+    保持する部品で、この力の伝達経路には入らない(以前は帯と棒を直列
+    バネとして数えていたが、テープで貼る構造に変えた時点で誤りになった)。
     """
     deflection = max(1 / actual_radius - 1 / frame.natural_radius, 0.0)
-    bridge_stiffness = (
+    stiffness = (
         frame.bridge_width * frame.bridge_thickness**3 / 12
     ) / path_length**3
-    # 左右の棒は並列(2本で1つのバネ)、それが帯と直列につながる
-    rods_stiffness = sum(_rod_stiffness(rod) for rod in rods)
-    stiffness = 1 / (1 / bridge_stiffness + 1 / rods_stiffness)
-    return stiffness / _REF_STIFFNESS * deflection
+    # 力のうち小鼻を外へ開くのに使えるのは、貼り代の面が外を向いている
+    # ぶんだけ(frame_model.tape_outward_ratio)
+    return stiffness / _REF_STIFFNESS * deflection * tape_outward_ratio(frame, params)
+
+
+def _plug_hold(rods: list[RodPath]) -> float:
+    """鼻栓の保持剛性(機能性、最大化)。左右の棒を、タブ側を固定端・
+    レンズ側を荷重点とする片持ち梁とみなしたときのバネ定数の合計
+    (基準の帯の剛性=1で正規化)。
+
+    棒が柔らかいとレンズが振られ、差した鼻栓がぐらついて抜けやすい。
+    太く短い棒ほど高いが、そのぶん目立つ(inconspicuousness)ため、
+    leg_thicknessと装着位置(bridge_y、棒の長さを決める)に本質的な
+    トレードオフを作る。
+    """
+    return sum(_rod_stiffness(rod) for rod in rods) / _REF_STIFFNESS
 
 
 def _visible_area(
@@ -223,10 +280,10 @@ class FrameScore:
     """
 
     # 目的(3つ)
-    extension_force: float  # 機能性: 鼻腔を広げる拡張力(基準の帯の剛性=1の相対値、最大化)
-    pain: float  # 快適さ: 皮膚にかかる圧力(拡張力/接触面積、最小化)
+    extension_force: float  # 機能性: 小鼻を広げる拡張力(基準の帯の剛性=1の相対値、最大化)
+    plug_hold: float  # 機能性: 鼻栓の保持剛性(同じ正規化、最大化)
     inconspicuousness: float  # 意匠性: 目立たなさ(-正面から見た投影面積mm^2、最大化)
-    # 制約(10個。すべて0以下であるべき)
+    # 制約(14個。すべて0以下であるべき)
     curvature_margin: float  # natural_radiusが十分平らか(0以下であるべき)
     bridge_clearance_margin: float  # ブリッジのめり込み超過量(0以下であるべき)
     leg_clearance_margin: float  # 棒のめり込み超過量(0以下であるべき)
@@ -234,9 +291,13 @@ class FrameScore:
     collar_position_margin: float  # レンズが鼻栓の範囲内か(左右のうち厳しい方、0以下であるべき)
     lens_protrusion_margin: float  # 棒がレンズからはみ出していないか(0以下であるべき)
     rod_thickness_margin: float  # 棒の最も細いところが印刷できる太さか(0以下であるべき)
+    rod_kink_margin: float  # 棒の曲がりが急すぎて自己交差していないか(0以下であるべき)
     tab_fit_margin: float  # 嵌め込みのスロットが帯に収まるか(0以下であるべき)
     tab_thickness_margin: float  # タブの厚みが足りているか(0以下であるべき)
     tab_retention_margin: float  # 嵌め込みの返しが実際に引っかかるか(0以下であるべき)
+    skin_pressure_margin: float  # 貼り代にかかる面圧が上限以内か(0以下であるべき)
+    tape_area_margin: float  # 両面テープの貼り代の面積が足りるか(0以下であるべき)
+    joint_access_margin: float  # 連結部が鼻の側面に寄っているか(0以下であるべき)
 
 
 # 0以下が合格ラインの制約に共通で使う、浮動小数点誤差を吸収するための
@@ -256,9 +317,13 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.collar_position_margin - _MARGIN_EPSILON,
         score.lens_protrusion_margin - _MARGIN_EPSILON,
         score.rod_thickness_margin - _MARGIN_EPSILON,
+        score.rod_kink_margin - _MARGIN_EPSILON,
         score.tab_fit_margin - _MARGIN_EPSILON,
         score.tab_thickness_margin - _MARGIN_EPSILON,
         score.tab_retention_margin - _MARGIN_EPSILON,
+        score.skin_pressure_margin - _MARGIN_EPSILON,
+        score.tape_area_margin - _MARGIN_EPSILON,
+        score.joint_access_margin - _MARGIN_EPSILON,
     )
 
 
@@ -276,19 +341,19 @@ def evaluate_frame(
     validate_target_reach(plug, params)
     validate_collar_no_overlap(plug, params)
     body = build_nose_body(params)
-    bridge = bridge_points(body, params)
+    bridge = bridge_points(body, params, frame.bridge_y, frame.tab_side_ratio)
     actual_radius, path_length = bridge_curvature(bridge)
 
     _, left_rod, right_rod, left_collar, right_collar = build_paths(frame, plug, params, body)
     rods = [left_rod, right_rod]
     collars = [left_collar, right_collar]
 
-    force = _extension_force(frame, actual_radius, path_length, rods)
-    contact_area = path_length * frame.bridge_width
+    force = _extension_force(frame, params, actual_radius, path_length)
+    pad_area = tape_pad_area(frame, params)
 
     return FrameScore(
         extension_force=force,
-        pain=force / contact_area,
+        plug_hold=_plug_hold(rods),
         inconspicuousness=-_visible_area(frame, bridge, rods, collars),
         curvature_margin=curvature_margin(frame, bridge),
         bridge_clearance_margin=bridge_clearance_margin(frame, params, body),
@@ -300,7 +365,11 @@ def evaluate_frame(
         ),
         lens_protrusion_margin=lens_protrusion_margin(rods, collars),
         rod_thickness_margin=rod_thickness_margin(rods),
+        rod_kink_margin=rod_kink_margin(rods),
         tab_fit_margin=tab_fit_margin(frame, params),
         tab_thickness_margin=tab_thickness_margin(frame),
         tab_retention_margin=tab_retention_margin(frame),
+        skin_pressure_margin=force / pad_area - _MAX_SKIN_PRESSURE,
+        tape_area_margin=tape_area_margin(frame, params),
+        joint_access_margin=joint_access_margin(frame, params, body),
     )

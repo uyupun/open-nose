@@ -52,14 +52,14 @@
 
 ## 幾何(座標系: x=左右、y=鼻先(0)→鼻筋、z=前後(前面が+)。earrings/spiralと同じ)
 
-- **ブリッジ(bridge_points/_bridge_grid/_ribbon_mesh)**: 高さ_BRIDGE_Yの
+- **ブリッジ(bridge_points/_bridge_grid/_ribbon_mesh)**: 高さbridge_yの
   断面の実際の形状(commons.nose_model.surface_profile_at・commons.
   rounded_triangle.rounded_triangle_ring)から前面の丸め弧+直線の辺を
-  組み立て、_BRIDGE_Y±bridge_width/2の範囲で格子状にロフトし、表面から
+  組み立て、bridge_y±bridge_width/2の範囲で格子状にロフトし、表面から
   BRIDGE_OFFSET(肌側の面)〜BRIDGE_OFFSET+bridge_thickness(外側の面)の
   帯にする。
 - **タブ・スロット(_tab_frame/_tab_polygon/_tab_prism)**: 帯の下縁
-  (y=_BRIDGE_Y-bridge_width/2)の、帯の端から内側へ入った位置に置く。
+  (y=bridge_y-bridge_width/2)の、帯の端から内側へ入った位置に置く。
   帯の面内の2次元座標(u=帯に沿った横方向、v=帯の下縁から上向き)で
   矢じり形の多角形を作り、帯の法線方向に押し出した角柱で帯を切る。
   タブ=帯∩角柱(帯と完全に同じ面・同じ厚み)、スロット=帯−(角柱を
@@ -124,23 +124,54 @@ _FRAME_COLOR = [90, 90, 100, 200]
 # 棒(タブ〜レンズ)の長さは実測14.7→21.1→42.3→27.7mm。鼻の長さ
 # (NoseParams.nose_len=52.2mm)の1/4ほどの高さで、小鼻の隆起のすぐ上に
 # 帯が乗る位置になる
-_BRIDGE_Y = 14.0
+# (装着位置そのものはFrameParams.bridge_yとしてGAの探索変数にした。
+# ここに残すのは、その既定値の根拠と経緯)
+_DEFAULT_BRIDGE_Y = 14.0
 # ブリッジの帯の肌側の面を、鼻の表面(最近接点)からどれだけ外側
 # (その点の三角形の法線方向)へ逃がすか(mm)。帯(_ribbon_mesh)が幅方向に
 # も鼻の表面に沿う格子で作られるため小さい値で足りる。棒の鼻の側面に沿う
 # 区間も、帯の厚みの中央(BRIDGE_OFFSET+bridge_thickness/2)を通すことで
 # タブとの継ぎ目に段差(折れ)ができないようにしている
 BRIDGE_OFFSET = 0.4
-# ブリッジの端(鼻の側面の外縁とみなす位置)を、断面の「直線の辺」
-# (_side_edge_span: 前面の丸め弧の端から背面角の丸め弧の端まで)の
-# どこに置くかで指定する(0=前面寄りの端、1=背面角の手前)。
+# タブ(連結部)を置く位置を、断面の「直線の辺」(_side_edge_span: 前面の
+# 丸め弧の端から背面角の丸め弧の端まで)のどこにするかで指定する
+# (0=前面寄りの端、1=背面角の手前)。タブの中心はここからスロットの
+# 半分+肉厚だけ内側に入る(_tab_frame)。
 # 以前はhalf_width(角を丸める前の三角形の半幅)に対する比率だったが、
 # 丸めで実際の断面は半幅よりずっと小さく、比率0.5〜0.6でも帯の端が鼻の
 # 表面より外(空中)に出ていた。タブもスロットも鼻に乗っていない位置に
-# 置かれるため、直線の辺そのものを基準に測る形に改めた。0.55は、帯の端を
-# 鼻の側面の見える範囲に置きつつ、タブのスロット(周りの肉を含む)が
-# 直線部分に収まる(tab_fit_margin)値
-_BRIDGE_SIDE_EDGE_RATIO = 0.75
+# 置かれるため、直線の辺そのものを基準に測る形に改めた
+_DEFAULT_TAB_SIDE_EDGE_RATIO = 1.0
+# 連結部が鼻の側面にどれだけ寄っていなければならないか(断面の最大xに
+# 対するタブ中心のxの比率)。ユーザー指摘「アーチと棒の接続部分、もう少し
+# 外側にあってもいい。今だと鼻の正面に沿っていて、メガネをしていると
+# 付けづらそう」への対応。正面寄りにあると、メガネの鼻パッドやブリッジと
+# 干渉するうえ、タブを押し込むときに指が正面から入らない
+# (鼻の断面を丸くした分、平らなタブ・スロットを置ける「直線の辺」が
+# 短くなり、連結部を外へ寄せられる限界も下がった。丸める前は0.85まで
+# 届いたが、いまは1.0(直線の辺の外端)でも0.70前後)
+_MIN_JOINT_LATERAL_RATIO = 0.66
+# 帯を、タブの位置よりさらに外側へ伸ばす長さ(mm、断面の輪郭に沿って
+# 測る)。ユーザー要望「アーチの両端に医療用両面テープを貼ってブリーズ
+# ライトのように小鼻を広げたい。今は連結部が端にあってテープが貼れない」
+# への対応で、連結部はそのままに、その外側にテープの貼り代を作る。
+# 直線の辺を越えて背面角の丸め弧にかかるぶんは、輪郭に沿って曲げる
+# (_side_outline)ので鼻から浮かない
+_BRIDGE_TAPE_SPAN = 6.0
+# 貼り代の区間を輪郭に沿って何点で近似するか(断面ごとの点数を揃える
+# ため固定。_bridge_gridがこの点数で格子を組む)
+_BRIDGE_TAPE_SAMPLES = 5
+# 貼り代を伸ばしてよいのは、断面の輪郭の外向き法線のx成分がこの値以上の
+# 範囲まで(ユーザー指摘「アーチの両端が曲がりすぎている。ブリーズライトの
+# ように鼻腔を広げる役割にならないといけない」)。鼻の側面から背面へ回り
+# 込んだ範囲に貼り代を伸ばしても、帯が曲げ戻る力は外(+x、小鼻を開く向き)
+# ではなく後ろ向きになり、鼻腔を広げる働きをしない(実測: 連結部から6mm
+# 外側では法線のx成分が0.34、8mmでは0.08まで落ちる)。0.5は、力の半分以上が
+# 外向きに使える範囲という意味
+_MIN_TAPE_NORMAL_X = 0.5
+# 帯の断面の経路を何点で表すか(弧長で等間隔)。前面の丸め弧と直線の辺で
+# 点の密度が極端に違うと、なめらかなアーチへ寄せる処理が効かない
+_BRIDGE_PROFILE_SAMPLES = 41
 # ブリッジを幅方向(y方向)にも鼻の表面に沿わせる際の、断面のロフト本数
 _BRIDGE_WIDTH_SAMPLES = 5
 # 棒が鼻の側面に沿う区間(_side_follow_points)の下端のy座標(mm)と、
@@ -148,7 +179,16 @@ _BRIDGE_WIDTH_SAMPLES = 5
 # エルミート曲線になる(_rod_path)。-1.0にしていたが、鼻孔とレンズが
 # 大きくなり、鼻の側面を降り切ってから横移動するとレンズの真上を
 # 通れず壁を斜めに横切ってしまうため、0.5へ上げて早めに切り替える
-_SIDE_FOLLOW_END_Y = 0.5
+_SIDE_FOLLOW_END_Y = -0.5
+# 鼻の面ごとの法線でギザついた経路を均す移動平均の回数
+_SIDE_FOLLOW_SMOOTH_PASSES = 3
+# 棒が鼻の表面に対して最低限あけるすきま(mm、線径の半分のうちめり込みを
+# 許さない分に足す)と、押し出し量を均す移動平均の回数(_keep_off_body)
+_ROD_BODY_GAP = 0.05
+_ROD_PUSH_SMOOTH_PASSES = 20
+_ROD_PUSH_ROUNDS = 6
+# レンズへ入る手前で押し出しを0へ落とす距離(mm)
+_ROD_PUSH_TAPER = 4.0
 _SIDE_FOLLOW_SAMPLES = 8
 # natural_radiusがactual_radiusより何倍大きくなければならないか。1.0だけを
 # 要求するとGAがほぼ同じ値を選び拡張力がほぼ0の個体になりうるため、
@@ -200,15 +240,21 @@ _COLLAR_PLUG_INSET = 0.15
 # 入り、そのまま輪の一部として続いて見える。短すぎると棒の先端の丸い
 # 端が輪の途中に浮いて見えるため、壁の中に十分埋もれる長さにした
 _ROD_JOINT_ARC_DEG = 60.0
-# 棒のエルミート曲線(鼻の側面の下端→レンズの接点の真上)の近似点数と、
-# そこからレンズの外周面へまっすぐ降りる区間の点数
+# 棒のエルミート曲線(鼻の側面の下端→レンズの接点の手前)の近似点数と、
+# そこから輪の接線方向へ向きを変える四分円の点数
 _ROD_STEM_SAMPLES = 40
-_ROD_DROP_SAMPLES = 8
+_ROD_CORNER_SAMPLES = 12
 # 棒を球の凸包の連鎖で作るときの、球の中心の間隔(mm)。_rod_radiiが
 # 点ごとに半径を変えるため、細かいほどなめらかに太さが変わる
 _ROD_SAMPLE_SPACING = 0.2
 # 棒の球の近似精度(manifold3d.Manifold.sphereのcircular_segments)
 _ROD_SPHERE_SEGMENTS = 24
+# 棒の曲がりの半径が、その場所の棒の半径の何倍以上必要か
+# (rod_kink_marginが制約として監視する)。0.5にしていたが、鼻の下面を
+# よけるための押し出し(_keep_off_body)が入ると探索範囲の3分の2で
+# 違反するため0.3にした。これでも、この制約を入れる原因になった経路の
+# 角(実測0.14倍)は弾ける
+_MIN_TURN_RADIUS_RATIO = 0.3
 # 棒がレンズの下端・内径に対して残す余裕(mm)。0にすると棒の表面と
 # レンズの面がちょうど一致し(触れるだけの関係)、lens_protrusion_marginが
 # 常に0(境界)になって余裕の有無が分からなくなるため、わずかに離す
@@ -254,7 +300,7 @@ _TAB_MIN_WALL = 0.8
 # ジョイントのような連結部分も同様に太さ調整して」「まだ太くして欲しい」)で
 # 0.8→1.0→1.8→2.4mmと上げた(FDMの0.2mm積層で12層)。棒もタブの首の中では
 # この厚みまでしか太くできないため、_MIN_ROD_DIAMETER以上にしている
-_MIN_TAB_THICKNESS = 2.4
+_MIN_TAB_THICKNESS = 2.0
 # 抜け止めの引っかかり(tab_head_oversizeからはめあいの隙間を引いた残り)の
 # 最小値(mm)。これを下回ると、押し込んでも「返し」が効かず抜けてしまう。
 # ユーザー要望(「まだ太くして欲しい」)で0.2→0.3mmに上げ、返しそのものも
@@ -273,6 +319,23 @@ _TAB_PRISM_DEPTH = 10.0
 # タブの首の下端を、帯の下縁よりどれだけ下まで伸ばして角柱を作るか(mm)。
 # スロットを帯の下縁まで確実に開通させるための余裕
 _TAB_PRISM_BELOW_EDGE = 2.0
+# 連結部まわりだけ帯を厚くする「パッド」の厚み(mm)と、そこから帯本来の
+# 厚みへなめらかに戻すまでの距離(mm)。ユーザー要望でアーチ本体を1mm程度
+# まで薄くしたが、タブ・スロットは帯と同じ厚みで嵌め合うため、1mmのままでは
+# 嵌め込みが持たず、棒もタブの首の中で1mmまでしか太くできない。肌側の面は
+# 平らなまま(テープが貼れる)、外側の面だけ盛り上げる
+_TAB_PAD_THICKNESS = 2.4
+_TAB_PAD_FADE = 2.0
+# 帯本体(テープを貼る薄い部分)の、印刷に耐える最小の厚み(mm)。FDMの
+# 0.2mm積層で3層。連結部はパッドで厚くする(_TAB_PAD_THICKNESS)ので、
+# こちらは「薄い帯として成立する下限」だけを見る
+_MIN_BRIDGE_THICKNESS = 0.6
+# 両端の貼り代(医療用両面テープを貼る面)の面積の下限(mm^2、左右合計)。
+# 片側5mm×4mm程度は欲しいという水準の暫定値。テープの実物で測って
+# 見直す前提(_MAX_SKIN_PRESSUREも同じ)。貼り代の長さは、鼻の背面側へ
+# 回り込む手前で打ち切られる(tape_pad_span)ため6mmより短くなることが
+# 多く、48mm^2では探索範囲の6割を弾いてしまったので40mm^2にした
+_MIN_TAPE_AREA = 40.0
 
 
 @dataclass(frozen=True)
@@ -285,8 +348,17 @@ class FrameParams:
     """
 
     natural_radius: float = 60.0
+    # 連結部(タブ・スロット)を、断面の直線の辺のどこに置くか
+    # (0=鼻の正面寄りの端、1=背面角の手前)。以前は定数だったが、
+    # メガネとの干渉・嵌め込みのしやすさ(joint_access_margin)と、
+    # その外側に残るテープの貼り代の兼ね合いを最適化させるため変数にした
+    tab_side_ratio: float = _DEFAULT_TAB_SIDE_EDGE_RATIO
+    # 帯を鼻のどの高さに貼るか(y座標、mm)。以前は定数_BRIDGE_Yだったが、
+    # 装着位置は拡張力(装着後の曲率半径・帯の経路長)・棒の長さ・目立ち方の
+    # すべてを左右するのに最適化の対象外だったため、探索変数にした
+    bridge_y: float = _DEFAULT_BRIDGE_Y
     bridge_width: float = 5.0
-    bridge_thickness: float = 2.8
+    bridge_thickness: float = 1.0
     leg_thickness: float = 3.2
     collar_length: float = 2.08
     tab_head_oversize: float = 0.55
@@ -294,6 +366,8 @@ class FrameParams:
     def __post_init__(self) -> None:
         for name in (
             "natural_radius",
+            "tab_side_ratio",
+            "bridge_y",
             "bridge_width",
             "bridge_thickness",
             "leg_thickness",
@@ -375,16 +449,18 @@ def _offset_along_surface_normal(
     return points + body.face_normals[triangle_id] * offset
 
 
-def bridge_points(body: trimesh.Trimesh, params: NoseParams) -> list[np.ndarray]:
-    """ブリッジ(小鼻の高さを左右に横断する経路)の点列を返す
+def bridge_points(
+    body: trimesh.Trimesh, params: NoseParams, bridge_y: float, tab_side_ratio: float
+) -> list[np.ndarray]:
+    """ブリッジ(鼻を左右に横断する経路)の点列を返す
     (points[0]が+x側の端、points[-1]が-x側の端)。
 
-    frame(FrameParams)に依存しない(NoseParamsだけで決まる幾何、装着後の
-    実際の曲率は鼻の形状そのもの)ため、frame引数を取らない。高さ_BRIDGE_Y
+    形は鼻の断面そのもの(帯の厚み・幅には依存しない)なので、frameからは
+    装着位置(bridge_y)だけを受け取る。高さbridge_y
     の断面(_bridge_profile_points)をBRIDGE_OFFSETだけ鼻の表面から浮かせる。
     拡張力の計算(bridge_curvature)に使う。
     """
-    points = _bridge_profile_points(params, _BRIDGE_Y)
+    points = _bridge_profile_points(params, bridge_y, tab_side_ratio)
     return list(_offset_along_surface_normal(body, points, BRIDGE_OFFSET))
 
 
@@ -408,34 +484,121 @@ def _side_edge_x(params: NoseParams, y: float, ratio: float) -> float:
     return float(inner[0] + ratio * (outer[0] - inner[0]))
 
 
-def _bridge_profile_points(params: NoseParams, y: float) -> np.ndarray:
+def _tab_pad_thickness(frame: FrameParams) -> float:
+    """連結部(タブ・スロット)まわりの帯の厚み(パッドを含む)を返す。
+
+    帯本体はテープを貼るため薄くする(ユーザー要望で1mm前後)が、そのまま
+    だと嵌め合いが持たず、棒もタブの首の中でその厚みまでしか太くできない。
+    連結部だけ_TAB_PAD_THICKNESSまで厚くする(帯の方が厚ければそのまま)。
+    """
+    return max(frame.bridge_thickness, _TAB_PAD_THICKNESS)
+
+
+def _side_outline(params: NoseParams, y: float) -> tuple[np.ndarray, np.ndarray]:
+    """高さyの断面の+x側の輪郭を、内側(前面の丸め弧の端)から外側へ
+    たどった点列(x, z)と、その累積弧長を返す。
+
+    直線の辺(_side_edge_span)を通り、その先の背面角の丸め弧まで続く。
+    帯をタブより外側へ伸ばす(_BRIDGE_TAPE_SPAN、テープの貼り代)とき、
+    直線の辺の延長では鼻の表面から浮いてしまうため、実際の輪郭の点を
+    そのままたどる。
+    """
+    half_width, depth_back, depth_front = surface_profile_at(params, y)
+    ring_2d = rounded_triangle_ring(half_width, depth_back, depth_front)
+    # 輪郭は[背面左角の弧, ブーメラン, 背面右角の弧, 前面角の弧]の順。
+    # 前面角の弧の始点(直線の辺の内側の端)から、背面右角の弧を逆順に
+    # たどると、内側→外側→背面へ回り込む向きになる
+    outline = ring_2d[-POINTS_PER_CORNER : -3 * POINTS_PER_CORNER : -1]
+    steps = np.linalg.norm(np.diff(outline, axis=0), axis=1)
+    return outline, np.concatenate([[0.0], np.cumsum(steps)])
+
+
+def _outline_at(outline: np.ndarray, arc: np.ndarray, span: float) -> np.ndarray:
+    """_side_outlineの点列を弧長spanだけ進んだ位置の(x, z)を返す。"""
+    span = float(np.clip(span, 0.0, arc[-1]))
+    return np.array([np.interp(span, arc, outline[:, k]) for k in range(2)])
+
+
+def _outline_normal_x(outline: np.ndarray) -> np.ndarray:
+    """_side_outlineの各区間の外向き法線のx成分を返す(長さは点数-1)。
+
+    1に近いほどその区間の面はまっすぐ外(+x、小鼻を開く向き)を向いており、
+    0に近いほど鼻の背面側へ回り込んでいる。
+    """
+    segments = np.diff(outline, axis=0)
+    normals = np.stack([segments[:, 1], -segments[:, 0]], axis=1)
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    return np.abs(normals[:, 0])
+
+
+def tape_pad_span(
+    params: NoseParams, y: float, tab_side_ratio: float
+) -> tuple[float, float]:
+    """高さyの断面で、テープの貼り代に使える区間(輪郭に沿った弧長の
+    始点・終点)を返す。
+
+    始点は連結部の位置、終点はそこから_BRIDGE_TAPE_SPANだけ外側。ただし
+    断面の輪郭が鼻の背面側へ回り込む(外向き法線のx成分が
+    _MIN_TAPE_NORMAL_Xを下回る)ところで打ち切る。打ち切らずに輪郭を
+    たどると帯の両端が巻き込むように曲がり、ブリーズライトのように
+    小鼻を外へ開く働きをしなくなる(_MIN_TAPE_NORMAL_Xのコメント参照)。
+    """
+    outline, arc = _side_outline(params, y)
+    start = tab_side_ratio * float(arc[1])
+    outward = _outline_normal_x(outline)
+    limit = float(arc[-1])
+    for index, value in enumerate(outward):
+        if arc[index + 1] > start and value < _MIN_TAPE_NORMAL_X:
+            limit = float(arc[index])
+            break
+    end = min(start + _BRIDGE_TAPE_SPAN, limit)
+    return start, max(end, start)
+
+
+def _bridge_profile_points(
+    params: NoseParams, y: float, tab_side_ratio: float
+) -> np.ndarray:
     """bridge_pointsと同じ組み立て方(高さyの断面の前面の丸め弧+直線の
     延長)を、任意の高さyについて評価する(オフセット前、鼻の表面上の
-    生の点)。bridge_points(y=_BRIDGE_Y)・_bridge_grid(yを複数評価して
+    生の点)。bridge_points(y=bridge_y)・_bridge_grid(yを複数評価して
     ブリッジを幅方向にも鼻の表面に沿わせる)の共通実装。
     """
     half_width, depth_back, depth_front = surface_profile_at(params, y)
     ring_2d = rounded_triangle_ring(half_width, depth_back, depth_front)
     front_arc = ring_2d[-POINTS_PER_CORNER:]  # xが+から-へ並ぶ(丸め弧)
 
-    # 丸め弧が接する辺の傾き(角丸三角形の前面頂点(0, depth_front)から
-    # 背面の角(half_width, -depth_back)への向き)。丸め弧の両端は、
-    # 定義によりこの辺の上にある(rounded_triangle.pyの_fillet_corner参照)
-    edge_slope = (-depth_back - depth_front) / half_width
-    target_x = _side_edge_x(params, y, _BRIDGE_SIDE_EDGE_RATIO)
+    outline, arc = _side_outline(params, y)
+    # タブの基準位置(直線の辺のtab_side_ratioの点)から、テープの貼り代
+    # ぶんだけ輪郭に沿って外側へ伸ばす(背面へ回り込む手前で打ち切る)
+    start_span, end_span = tape_pad_span(params, y, tab_side_ratio)
+    spans = np.linspace(start_span, end_span, _BRIDGE_TAPE_SAMPLES)
+    tape = np.array([_outline_at(outline, arc, float(span)) for span in spans])
 
-    right_tangent_x, right_tangent_z = front_arc[0]
-    right_end_z = right_tangent_z + (target_x - right_tangent_x) * edge_slope
-
-    xs = np.concatenate([[target_x], front_arc[:, 0], [-target_x]])
-    zs = np.concatenate([[right_end_z], front_arc[:, 1], [right_end_z]])
-    return np.stack([xs, np.full(len(xs), y), zs], axis=1)
-def _bridge_grid(params: NoseParams, width: float) -> np.ndarray:
-    """ブリッジを幅方向(y方向、_BRIDGE_Y±width/2)にも鼻の表面に沿わせる
+    # +x側は外側から内側へ、-x側は内側から外側へ並べ、前面の丸め弧を
+    # 挟んで1本の折れ線にしてから、弧長で等間隔に取り直す。粗いままだと
+    # 前面の丸め弧(点が密)から直線の辺(1本の長い線分)へ移るところで
+    # 帯の面が急に折れ、「くの字」に見える(ユーザー指摘)
+    xs = np.concatenate([tape[::-1, 0], front_arc[:, 0], -tape[:, 0]])
+    zs = np.concatenate([tape[::-1, 1], front_arc[:, 1], tape[:, 1]])
+    profile = np.stack([xs, zs], axis=1)
+    steps = np.concatenate(
+        [[0.0], np.cumsum(np.linalg.norm(np.diff(profile, axis=0), axis=1))]
+    )
+    even = np.linspace(0.0, steps[-1], _BRIDGE_PROFILE_SAMPLES)
+    profile = np.stack(
+        [np.interp(even, steps, profile[:, k]) for k in range(2)], axis=1
+    )
+    return np.stack(
+        [profile[:, 0], np.full(len(profile), y), profile[:, 1]], axis=1
+    )
+def _bridge_grid(
+    params: NoseParams, bridge_y: float, width: float, tab_side_ratio: float
+) -> np.ndarray:
+    """ブリッジを幅方向(y方向、bridge_y±width/2)にも鼻の表面に沿わせる
     ための格子点(オフセット前、鼻の表面上の生の点)を返す(shape:
     (_BRIDGE_WIDTH_SAMPLES, 13, 3))。
 
-    以前はブリッジの中心の経路(bridge_points、高さ_BRIDGE_Yのみ)を
+    以前はブリッジの中心の経路(bridge_points、高さbridge_yのみ)を
     グローバルなy軸方向に±width/2だけ平行移動して長方形の断面を作って
     いたが、鼻の断面(half_width・depth_back・depth_front)は高さyに
     よって変わる(commons.nose_model.surface_profile_at)ため、この平行
@@ -445,8 +608,10 @@ def _bridge_grid(params: NoseParams, width: float) -> np.ndarray:
     pointsを複数の高さyで評価し、各高さの断面をそのまま並べる(ロフト)
     ことで、幅方向にも実際の鼻の丸みに沿う帯を作る。
     """
-    ys = np.linspace(_BRIDGE_Y - width / 2, _BRIDGE_Y + width / 2, _BRIDGE_WIDTH_SAMPLES)
-    return np.stack([_bridge_profile_points(params, float(y)) for y in ys], axis=0)
+    ys = np.linspace(bridge_y - width / 2, bridge_y + width / 2, _BRIDGE_WIDTH_SAMPLES)
+    return np.stack(
+        [_bridge_profile_points(params, float(y), tab_side_ratio) for y in ys], axis=0
+    )
 def bridge_curvature(bridge: list[np.ndarray]) -> tuple[float, float]:
     """ブリッジの実際の曲率半径(actual_radius)と経路長(path_length)を返す。
 
@@ -496,7 +661,7 @@ def _tab_frame(
 ) -> TabFrame:
     """タブ・スロットの位置と局所座標系(TabFrame)を返す。
 
-    帯の下縁(y=_BRIDGE_Y-bridge_width/2)の、帯の端から内側へ入った位置に
+    帯の下縁(y=bridge_y-bridge_width/2)の、帯の端から内側へ入った位置に
     置く。帯の端のxは高さごとに違う(half_width(y)*_BRIDGE_HALF_SPAN_RATIO)
     ため、最も内側になる上縁の高さの端を基準にし、そこから帯に沿って
     (頭の半幅+_TAB_CLEARANCE+_TAB_MIN_WALL)だけ内側にする(スロットの
@@ -505,10 +670,12 @@ def _tab_frame(
     中心は鼻の表面から帯の厚みの中央(BRIDGE_OFFSET+bridge_thickness/2)
     だけ浮かせた点。まず+x側で計算してからsideで鏡映する。
     """
-    y_edge = _BRIDGE_Y - frame.bridge_width / 2
+    y_edge = frame.bridge_y - frame.bridge_width / 2
     # 帯の端のxは高さごとに違う(断面が鼻先へ向かって広がる)ため、最も
     # 内側になる上縁の高さの端を基準にする
-    x_end = _side_edge_x(params, _BRIDGE_Y + frame.bridge_width / 2, _BRIDGE_SIDE_EDGE_RATIO)
+    x_end = _side_edge_x(
+        params, frame.bridge_y + frame.bridge_width / 2, frame.tab_side_ratio
+    )
     half_width, depth_back, depth_front = surface_profile_at(params, y_edge)
     edge_slope = (-depth_back - depth_front) / half_width
     u_xz = np.array([1.0, edge_slope]) / np.hypot(1.0, edge_slope)
@@ -520,7 +687,7 @@ def _tab_frame(
     raw = np.array([[x_anchor, y_edge, _edge_z_at(params, y_edge, x_anchor)]])
     _, _, triangle_id = trimesh.proximity.closest_point(body, raw)
     n = body.face_normals[triangle_id[0]]
-    center = raw[0] + n * (BRIDGE_OFFSET + frame.bridge_thickness / 2)
+    center = raw[0] + n * (BRIDGE_OFFSET + _tab_pad_thickness(frame) / 2)
 
     u = np.array([u_xz[0], 0.0, u_xz[1]])
     u = u - np.dot(u, n) * n
@@ -585,7 +752,23 @@ def _side_follow_points(
         x_at_y = _side_edge_x(params, float(y), ratio)
         raw.append([x_at_y, y, _edge_z_at(params, float(y), x_at_y)])
     offsets = np.linspace(offset, offset if end_offset is None else end_offset, len(ys))
-    return _offset_along_surface_normal(body, np.array(raw), offsets[:, None])
+    raw = np.array(raw)
+    # 浮かせる向きは「最も近い三角形の法線」なので、どの面を拾うかで点ごとに
+    # 向きが飛び、経路がギザつく。そのままだと曲がりの半径が棒の半径を
+    # 下回る箇所ができて管が自分自身に食い込むため、法線の側を移動平均で
+    # 均してから浮かせる(点自体を均すと、凸に曲がった経路が鼻の側へ
+    # 寄って、めり込み(leg_clearance_margin)が出てしまう)
+    raw_normals = _surface_normals(body, raw)
+    raw_normals = raw_normals / np.linalg.norm(raw_normals, axis=1, keepdims=True)
+    normals = raw_normals.copy()
+    for _ in range(_SIDE_FOLLOW_SMOOTH_PASSES):
+        normals[1:-1] = (normals[:-2] + 2 * normals[1:-1] + normals[2:]) / 4
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    # 均した向きは元の法線から少し傾くため、そのまま同じ長さだけ動かすと
+    # 表面からの距離が足りなくなる(鼻へのめり込みになる)。傾いたぶんだけ
+    # 長さを伸ばして、表面からの距離をoffsetに保つ
+    tilt = np.clip(np.einsum("ij,ij->i", normals, raw_normals), 0.5, 1.0)
+    return raw + normals * (offsets / tilt)[:, None]
 
 
 def _hermite(
@@ -608,6 +791,22 @@ def _resample(points: np.ndarray, spacing: float) -> np.ndarray:
     count = max(int(np.ceil(arc[-1] / spacing)) + 1, 2)
     samples = np.linspace(0.0, arc[-1], count)
     return np.stack([np.interp(samples, arc, points[:, k]) for k in range(3)], axis=1)
+
+
+def _turn_radii(points: np.ndarray) -> np.ndarray:
+    """点列の各点における曲がりの半径(3点の外接円の半径)を返す
+    (両端はinf)。直線なら大きな値になる。
+    """
+    radii = np.full(len(points), np.inf)
+    before, here, after = points[:-2], points[1:-1], points[2:]
+    area = np.linalg.norm(np.cross(before - here, after - here), axis=1)
+    sides = (
+        np.linalg.norm(before - here, axis=1)
+        * np.linalg.norm(after - here, axis=1)
+        * np.linalg.norm(before - after, axis=1)
+    )
+    radii[1:-1] = np.where(area > 1e-12, sides / np.maximum(2 * area, 1e-12), np.inf)
+    return radii
 
 
 def _rod_radii(
@@ -642,7 +841,7 @@ def _rod_radii(
     y = points[:, 1]
     rho = np.hypot(points[:, 0] - collar.center_x, points[:, 2] - collar.center_z)
     below_edge = -((points - tab.center) @ tab.v)
-    near_tab = min(frame.bridge_thickness / 2, tab.neck_half_width)
+    near_tab = min(_tab_pad_thickness(frame) / 2, tab.neck_half_width)
     radii = np.full(len(points), frame.leg_thickness / 2)
     radii = np.minimum(radii, np.maximum(near_tab, below_edge))
     radii = np.minimum(radii, y - collar.y_start - _ROD_LENS_GAP)
@@ -677,6 +876,50 @@ def _rod_radii(
     # 意図どおりで、鼻に当たるかはleg_clearance_margin・
     # collar_clearance_marginが別に見ている
     return np.maximum(radii, _ROD_MIN_RADIUS)
+
+
+def _keep_off_body(
+    body: trimesh.Trimesh,
+    points: np.ndarray,
+    frame: FrameParams,
+    collar: CollarGeometry,
+) -> np.ndarray:
+    """棒の経路のうち鼻に近すぎる点を、鼻の表面から離す。
+
+    鼻の側面に沿う区間(_side_follow_points)は表面からの距離を決めて作るが、
+    そこからレンズへ向かうエルミート曲線は両端の位置と向きだけで決まるため、
+    途中で鼻の下面(鼻先の丸み)をかすめることがある。鼻の断面の丸め方を
+    変えたときに、棒が許容量を超えて鼻へ食い込む状態(leg_clearance_margin
+    違反)として実際に表面化した。
+
+    各点について、必要な距離(線径の半分のうちめり込みを許さない分)に
+    足りないぶんだけ表面の法線方向へ押し出し、押し出し量は移動平均で均して
+    折れを作らないようにする。タブの中の始点と、レンズの高さまで降りた
+    区間(鼻より下で、押し出すとレンズから外れる)は動かさない。
+    """
+    required = frame.leg_thickness / 2 * (1 - _EMBED_RATIO) + _ROD_BODY_GAP
+    points = points.copy()
+    for _ in range(_ROD_PUSH_ROUNDS):
+        _, distance, triangle_id = trimesh.proximity.closest_point(body, points)
+        signed = np.where(body.contains(points), -distance, distance)
+        push = np.maximum(required - signed, 0.0)
+        push[0] = 0.0
+        # レンズへ入る手前では押し出しをなめらかに0へ落とす(ここで急に
+        # 打ち切ると、その境界が折れになる: rod_kink_margin違反)
+        taper = np.clip(
+            (points[:, 1] - collar.y_end) / _ROD_PUSH_TAPER, 0.0, 1.0
+        )
+        push *= taper**2 * (3 - 2 * taper)
+        if not np.any(push > 1e-6):
+            break
+        # 押し出し量を均してから適用する(点ごとに違う量を直接足すと、
+        # そこが折れになって管が自分自身に食い込む: rod_kink_margin)
+        for _ in range(_ROD_PUSH_SMOOTH_PASSES):
+            push[1:-1] = (push[:-2] + 2 * push[1:-1] + push[2:]) / 4
+        normals = body.face_normals[triangle_id]
+        normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+        points = points + normals * push[:, None]
+    return points
 
 
 def _rod_path(
@@ -716,8 +959,8 @@ def _rod_path(
         params,
         float(canonical_anchor[0]),
         float(canonical_anchor[1]),
-        BRIDGE_OFFSET + frame.bridge_thickness / 2,
-        BRIDGE_OFFSET + max(frame.bridge_thickness, frame.leg_thickness) / 2,
+        BRIDGE_OFFSET + _tab_pad_thickness(frame) / 2,
+        BRIDGE_OFFSET + max(_tab_pad_thickness(frame), frame.leg_thickness) / 2,
     )
 
     axis_x = abs(collar.center_x)
@@ -736,9 +979,13 @@ def _rod_path(
     radial = np.array([stem_start[0] - axis_x, stem_start[2] - collar.center_z])
     radial /= np.linalg.norm(radial)
     start_angle = float(np.arctan2(radial[1], radial[0]))
-    # 接点から、輪に沿って_ROD_JOINT_ARC_DEGだけ(角度が減る向き=鼻の
-    # 前面側から背面側へ)進む
-    angles = start_angle - np.radians(np.linspace(0.0, _ROD_JOINT_ARC_DEG, 8))
+    # 降りてくる位置(start_angle)から輪に沿ってblendぶん先を接点にし、
+    # そこからさらに_ROD_JOINT_ARC_DEGだけ(角度が減る向き=鼻の前面側から
+    # 背面側へ)進む。接点を降りてくる位置そのものにすると、角を丸める
+    # ぶん棒が輪に沿って手前(鼻の側)へ戻ることになり、鼻へめり込む
+    blend = min(frame.leg_thickness / 2, r_arc / 2)
+    contact_angle = start_angle - blend / r_arc
+    angles = contact_angle - np.radians(np.linspace(0.0, _ROD_JOINT_ARC_DEG, 8))
     arc = np.stack(
         [
             axis_x + r_arc * np.cos(angles),
@@ -748,24 +995,49 @@ def _rod_path(
         axis=1,
     )
     contact = arc[0]
+    # 到達時の接線(その点での輪の接線、進む向き)。y成分がないため、棒は
+    # レンズの面の中で輪に接して入る(ユーザーのスケッチ「6d」)
+    contact_tangent = np.array([np.sin(contact_angle), 0.0, -np.cos(contact_angle)])
     # 接点の真上(レンズの上面より棒の半径ぶん上)を経由してから、外周面に
     # 沿ってまっすぐ降りて輪に入る。エルミート曲線で接点へ直接つなぐと、
     # 棒が輪の壁(内径〜外径の間)を斜めに横切り、その区間で壁の残り厚み
     # (rho-r_inner)しか太さを使えず極端に細くなっていた(実測: 直径0.4mm)。
     # レンズより上では棒はいくら太くてもよい(_rod_radii参照)ので、横移動は
     # すべて上で済ませる
-    hold = np.array([contact[0], collar.y_end + frame.leg_thickness / 2, contact[2]])
+    # 輪へは、接点の「真上かつ接線方向に手前」から四分円で入る。真上から
+    # 降りてそのまま接線方向へ折れると、曲がりの半径が棒の半径を大きく
+    # 下回って管が自分自身に食い込み(実測: 曲率半径0.14mmに対し棒の
+    # 半径1.01mm)、そのメッシュはSTLへ書き出して座標で頂点を統合すると
+    # 閉じた立体でなくなる。丸めの半径は棒の半径ぶん取る
+    approach = np.array(
+        [
+            axis_x + r_arc * np.cos(start_angle),
+            y_mid + blend,
+            collar.center_z + r_arc * np.sin(start_angle),
+        ]
+    )
     direction = side_follow[-1] - side_follow[-2]
     direction /= np.linalg.norm(direction)
-    span = float(np.linalg.norm(hold - stem_start))
+    span = float(np.linalg.norm(approach - stem_start))
     stem = _hermite(
-        stem_start, direction * span, hold, np.array([0.0, -1.0, 0.0]) * span,
+        stem_start, direction * span, approach, np.array([0.0, -1.0, 0.0]) * span,
         _ROD_STEM_SAMPLES,
     )
-    drop = np.linspace(hold, contact, _ROD_DROP_SAMPLES)
-    stem = np.vstack([stem, drop[1:]])
+    # 四分円に近いエルミート(接線の大きさは半径の約1.3倍)
+    corner = _hermite(
+        approach,
+        np.array([0.0, -1.0, 0.0]) * blend * 1.3,
+        contact,
+        contact_tangent * blend * 1.3,
+        _ROD_CORNER_SAMPLES,
+    )
+    stem = np.vstack([stem, corner[1:]])
+
+    canonical = _keep_off_body(
+        body, np.vstack([[start], side_follow, stem[1:], arc[1:]]), frame, collar
+    )
     canonical = _resample(
-        np.vstack([[start], side_follow, stem[1:], arc[1:]]), _ROD_SAMPLE_SPACING
+        canonical, _ROD_SAMPLE_SPACING
     )
     points = canonical * np.array([side, 1.0, 1.0])
     return RodPath(points=points, radii=_rod_radii(frame, tab, collar, points))
@@ -779,7 +1051,7 @@ def build_paths(
     bodyは呼び出し側がbuild_nose_body(params)で構築済みのものを渡す
     (重複構築を避けるため)。
     """
-    bridge = bridge_points(body, params)
+    bridge = bridge_points(body, params, frame.bridge_y, frame.tab_side_ratio)
     rods = {}
     collars = {}
     for side in (-1, 1):
@@ -889,20 +1161,40 @@ def _to_manifold(mesh: trimesh.Trimesh) -> Manifold:
 
 
 def _to_trimesh(manifold: Manifold) -> trimesh.Trimesh:
-    """manifold3dのManifoldを、連結成分・退化面の後処理をしたtrimeshに変換する。"""
+    """manifold3dのManifoldを、連結成分・退化面の後処理をしたtrimeshに変換する。
+
+    同一座標の頂点の統合は、trimesh側(Trimesh(process=True)や
+    merge_vertices())ではなくmanifold3d側(Mesh.merge())で行う。trimeshの
+    統合は距離の閾値で機械的に潰すため、面同士が浅い角度で接する箇所では
+    non-manifoldな縁を作ってしまい、閉じていたはずの立体が
+    is_watertight=Falseになることが実測であった(探索範囲のランダム
+    サンプルで1/60程度の頻度)。manifold3dの統合は、自身が保証する
+    多様体性を壊さない範囲で行われる。
+    """
     mesh = manifold.to_mesh()
+    mesh.merge()
     result = trimesh.Trimesh(
-        vertices=mesh.vert_properties[:, :3], faces=mesh.tri_verts, process=True
+        vertices=mesh.vert_properties[:, :3], faces=mesh.tri_verts, process=False
     )
     return _clean_boolean_result(_largest_component(result))
 
 
 def _rod_manifold(rod: RodPath) -> Manifold:
-    """棒を、隣り合う2点の球(半径は点ごと)の凸包を連ねて結合した立体にする。
+    """棒を、経路上の各点に置いた球(半径は点ごと)の結合で作る。
 
-    凸包は常に閉じた凸立体で、隣り合う凸包は球1個分まるごと重なるため、
-    触れるだけの関係が生じずブーリアン結合が安定する。半径が点ごとに違う
-    場合も、凸包が2つの球をなめらかにつなぐテーパーになる。
+    球の間隔(_ROD_SAMPLE_SPACING=0.2mm)は棒の半径(1mm前後)よりずっと
+    小さいので、隣り合う球は必ず体積を持って重なり、触れるだけの関係が
+    どこにも生じない。表面は球の連なりの分だけ波打つが、その深さは
+    r-sqrt(r^2-(間隔/2)^2)で半径1mmなら0.005mmと、印刷の分解能よりはるかに
+    細かい。
+
+    以前は「隣り合う2点の球の凸包」を連ねていた。凸包どうしは共有する球の
+    表面では接するだけで内部が重ならず、その接触面が出力に残ると、STLへ
+    書き出して座標で頂点を統合し直したときに1本の辺を4面が共有する
+    non-manifoldな縁ができ、閉じた立体でなくなる(実測: 探索範囲の
+    ランダムサンプルで10〜20件に1件)。1つおきに半径を変える・球を半コマ
+    回す・経路の角を丸めるといった対策でも完全には消えず、球だけの結合に
+    変えて初めて全件で安定した。
     """
     spheres = [
         Manifold.sphere(float(radius), _ROD_SPHERE_SEGMENTS).translate(
@@ -910,8 +1202,7 @@ def _rod_manifold(rod: RodPath) -> Manifold:
         )
         for point, radius in zip(rod.points, rod.radii)
     ]
-    hulls = [Manifold.batch_hull([a, b]) for a, b in zip(spheres[:-1], spheres[1:])]
-    return Manifold.batch_boolean(hulls, OpType.Add)
+    return Manifold.batch_boolean(spheres, OpType.Add)
 
 
 def _clean_boolean_result(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -937,6 +1228,13 @@ def _clean_boolean_result(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     厳密に距離0のペアを複数実測で確認)。trimeshのmerge_vertices()で
     座標ベースに統合すると、これらの三角形の3頂点のうち2つが同一indexに
     潰れる(例: 面[51, 54, 54])。
+
+    座標ベースの統合はmanifold3d側(_to_trimeshのMesh.merge())でも行うが、
+    それは自身の多様体性を保つ範囲の統合なので、STLの読み手が行う「距離の
+    閾値で機械的に潰す」統合とは結果が違う。書き出したものが読み直しても
+    同じであるように、ここで後者と同じ統合をかけ、その結果に現れる退化面を
+    取り除いてから返す(=書き出す形は既に統合済みで、読み直しても変化
+    しない)。
 
     除去には、trimesh標準のnondegenerate_faces()(面積・オリエンテッド
     バウンディングボックスの短辺の長さで判定)ではなく、「3頂点のうち
@@ -1000,8 +1298,35 @@ def _surface_normals(body: trimesh.Trimesh, points: np.ndarray) -> np.ndarray:
     """
     _, _, triangle_id = trimesh.proximity.closest_point(body, points)
     return body.face_normals[triangle_id]
+def _ribbon_thickness(
+    frame: FrameParams, params: NoseParams, body: trimesh.Trimesh, points: np.ndarray
+) -> np.ndarray:
+    """帯の点ごとの厚みを返す(連結部まわりだけ_TAB_PAD_THICKNESSへ盛る)。
+
+    タブの中心を通り帯の幅方向(TabFrame.v)に伸びる直線からの距離で決める
+    (幅方向には全幅を厚くする)。スロットの外周(頭の半幅+はめあい+肉)
+    までは満額、そこから_TAB_PAD_FADEかけて余弦カーブで帯本来の厚みへ戻す。
+    """
+    thickness = np.full(len(points), frame.bridge_thickness)
+    pad = _tab_pad_thickness(frame)
+    if pad <= frame.bridge_thickness:
+        return thickness
+    for side in (-1, 1):
+        tab = _tab_frame(frame, params, body, side)
+        offset = points - tab.center
+        along = offset - np.outer(offset @ tab.v, tab.v)
+        distance = np.linalg.norm(along, axis=1)
+        core = tab.head_half_width + _TAB_CLEARANCE + _TAB_MIN_WALL
+        ratio = np.clip((distance - core) / _TAB_PAD_FADE, 0.0, 1.0)
+        bump = frame.bridge_thickness + (pad - frame.bridge_thickness) * 0.5 * (
+            1 + np.cos(np.pi * ratio)
+        )
+        thickness = np.maximum(thickness, bump)
+    return thickness
+
+
 def _ribbon_mesh(
-    body: trimesh.Trimesh, params: NoseParams, width: float, thickness: float
+    body: trimesh.Trimesh, params: NoseParams, frame: FrameParams
 ) -> trimesh.Trimesh:
     """幅width(y方向)×厚みthickness(表面法線方向)の帯状のメッシュ
     (ブリーズライトの平べったいテープを模したブリッジ)を、鼻の表面に
@@ -1022,11 +1347,14 @@ def _ribbon_mesh(
     (下面はa,c,b/a,d,c、上面はa,b,c/a,c,d、側面はwall関数のreverse
     フラグの通り)。
     """
-    grid = _bridge_grid(params, width)
+    grid = _bridge_grid(
+        params, frame.bridge_y, frame.bridge_width, frame.tab_side_ratio
+    )
     rows, cols, _ = grid.shape
     flat = grid.reshape(-1, 3)
     normals = _surface_normals(body, flat)
     normals = normals / np.linalg.norm(normals, axis=1, keepdims=True)
+    thickness = _ribbon_thickness(frame, params, body, flat)[:, None]
     bottom = flat + normals * BRIDGE_OFFSET
     top = flat + normals * (BRIDGE_OFFSET + thickness)
     vertices = np.concatenate([bottom, top], axis=0)
@@ -1187,7 +1515,7 @@ def bridge_clearance_margin(
     """
     radius = frame.bridge_thickness / 2
     allowed_embed = _EMBED_RATIO * radius
-    ribbon = _ribbon_mesh(body, params, frame.bridge_width, frame.bridge_thickness)
+    ribbon = _ribbon_mesh(body, params, frame)
     signed_distance = _signed_distance_to_body(body, ribbon.vertices)
     embed_amount = -signed_distance
     return float((embed_amount - allowed_embed).max())
@@ -1269,6 +1597,42 @@ def validate_lens_protrusion(rods: list[RodPath], collars: list[CollarGeometry])
         raise ValueError(f"棒がレンズから{margin:.3f}mmはみ出している")
 
 
+def rod_kink_margin(rods: list[RodPath]) -> float:
+    """棒の曲がりの半径が、その場所の棒の半径に対して十分あるかを返す
+    (正=不足、0以下=十分。左右のうち厳しい方)。
+
+    曲がりの半径が棒の半径を大きく下回ると、管が曲がりの内側で自分自身に
+    食い込む。球の結合で作るため(_rod_manifold)メッシュとしては破綻しないが、
+    そこは肉が急に厚くなる応力集中の角で、印刷の反りや折れの起点になる。
+    3点ずつの外接円の半径で曲がりの半径を測り、棒の半径の
+    _MIN_TURN_RADIUS_RATIO倍を下回らないことを要求する(実測: 経路の角を
+    丸める前は曲率半径0.14mmに対し棒の半径1.01mmだった)。
+    """
+    worst = -np.inf
+    for rod in rods:
+        points, radii = rod.points, rod.radii
+        before, here, after = points[:-2], points[1:-1], points[2:]
+        cross = np.cross(before - here, after - here)
+        area = np.linalg.norm(cross, axis=1)
+        sides = (
+            np.linalg.norm(before - here, axis=1)
+            * np.linalg.norm(after - here, axis=1)
+            * np.linalg.norm(before - after, axis=1)
+        )
+        turn_radius = np.where(area > 1e-12, sides / np.maximum(2 * area, 1e-12), np.inf)
+        worst = max(worst, float((_MIN_TURN_RADIUS_RATIO * radii[1:-1] - turn_radius).max()))
+    return worst
+
+
+def validate_rod_kink(rods: list[RodPath]) -> None:
+    """rod_kink_marginが正(=違反)の場合に例外を送出する。"""
+    margin = rod_kink_margin(rods)
+    if margin > _MARGIN_TOLERANCE:
+        raise ValueError(
+            f"棒の曲がりが急すぎて管が自分自身に食い込んでいる(不足{margin:.3f}mm)"
+        )
+
+
 def rod_thickness_margin(rods: list[RodPath]) -> float:
     """棒の最も細いところの直径が、印刷に必要な最小値(_MIN_ROD_DIAMETER)を
     下回っていないかを返す(正=不足量、0以下=十分。左右のうち厳しい方)。
@@ -1323,14 +1687,19 @@ def tab_fit_margin(frame: FrameParams, params: NoseParams) -> float:
     - 横(帯に沿った方向): スロット(タブ+はめあい+周りに残す肉)が、断面の
       直線の辺(_side_edge_span)の中に、内側・外側とも収まること。丸め弧の
       部分にかかると、タブの平らな角柱と帯の曲面がずれて嵌め込みの面が
-      合わず、さらに外側へ出ると帯そのものが鼻から浮く。
+      合わない(帯そのものは、テープの貼り代として丸め弧の上まで伸びて
+      よい。そちらは輪郭に沿わせてある: _side_outline)。
+    - テープの貼り代(_BRIDGE_TAPE_SPAN)が、断面の輪郭の残り(背面角の
+      丸め弧の終わりまで)に収まること。
     """
     vertical = (
         _TAB_NECK_LENGTH + _TAB_HEAD_LENGTH + _TAB_CLEARANCE + _TAB_MIN_WALL
     ) - frame.bridge_width
 
-    y_edge = _BRIDGE_Y - frame.bridge_width / 2
-    x_end = _side_edge_x(params, _BRIDGE_Y + frame.bridge_width / 2, _BRIDGE_SIDE_EDGE_RATIO)
+    y_edge = frame.bridge_y - frame.bridge_width / 2
+    x_end = _side_edge_x(
+        params, frame.bridge_y + frame.bridge_width / 2, frame.tab_side_ratio
+    )
     half_width, depth_back, depth_front = surface_profile_at(params, y_edge)
     edge_slope = (-depth_back - depth_front) / half_width
     u_x = 1.0 / np.hypot(1.0, edge_slope)
@@ -1339,7 +1708,14 @@ def tab_fit_margin(frame: FrameParams, params: NoseParams) -> float:
     inner_edge_x = x_end - 2 * inset * u_x
     inner, outer = _side_edge_span(params, y_edge)
     lateral = max(float(inner[0]) - inner_edge_x, x_end - float(outer[0]))
-    return max(vertical, lateral)
+
+    # テープの貼り代が輪郭からはみ出さないか(帯の幅の範囲すべての高さで)
+    tape = -np.inf
+    for y in (frame.bridge_y - frame.bridge_width / 2, frame.bridge_y + frame.bridge_width / 2):
+        _, arc = _side_outline(params, float(y))
+        used = frame.tab_side_ratio * float(arc[1])
+        tape = max(tape, used - float(arc[-1]))
+    return max(vertical, lateral, tape)
 
 
 def validate_tab_fit(frame: FrameParams, params: NoseParams) -> None:
@@ -1352,11 +1728,110 @@ def validate_tab_fit(frame: FrameParams, params: NoseParams) -> None:
         )
 
 
-def tab_thickness_margin(frame: FrameParams) -> float:
-    """タブ(=帯と同じ厚み)が印刷・嵌め込みに耐える厚みかを返す
-    (正=不足量、0以下=十分)。_MIN_TAB_THICKNESS参照。
+def joint_access_margin(
+    frame: FrameParams, params: NoseParams, body: trimesh.Trimesh
+) -> float:
+    """連結部が鼻の側面に十分寄っているかを返す(正=不足、0以下=十分)。
+
+    ユーザー指摘「アーチと棒の接続部分、もう少し外側にあってもいい。今だと
+    鼻の正面に沿っていて、メガネをしていると付けづらそう」への対応。
+    タブ中心のxが、その高さの断面の最大x(鼻のいちばん横に張り出す位置)の
+    _MIN_JOINT_LATERAL_RATIO倍以上あることを要求する。
+
+    正面寄りに置くほどメガネの鼻パッド・ブリッジと重なり、押し込むときに
+    指も正面から入れることになる。一方で外側へ寄せるほど、その外側に残る
+    テープの貼り代(tape_pad_area)が短くなるので、tab_side_ratioは
+    この2つの釣り合いで決まる。
     """
-    return _MIN_TAB_THICKNESS - frame.bridge_thickness
+    half_width, depth_back, depth_front = surface_profile_at(params, frame.bridge_y)
+    ring_2d = rounded_triangle_ring(half_width, depth_back, depth_front)
+    widest = float(ring_2d[:, 0].max())
+    tab = _tab_frame(frame, params, body, 1)
+    return _MIN_JOINT_LATERAL_RATIO - float(tab.center[0]) / widest
+
+
+def validate_joint_access(
+    frame: FrameParams, params: NoseParams, body: trimesh.Trimesh
+) -> None:
+    """joint_access_marginが正(=違反)の場合に例外を送出する。"""
+    margin = joint_access_margin(frame, params, body)
+    if margin > _MARGIN_TOLERANCE:
+        raise ValueError(
+            f"連結部が鼻の正面に寄りすぎている(不足{margin:.3f})。"
+            "tab_side_ratioを大きくすること"
+        )
+
+
+def tape_pad_area(frame: FrameParams, params: NoseParams) -> float:
+    """両端の貼り代(連結部より外側の帯)の面積の合計(mm^2)を返す。
+
+    医療用の両面テープを貼る面で、ここに貼った分だけ帯の拡張力を小鼻へ
+    伝えられる(ユーザーの用途: 「アーチの両端に両面テープを貼って
+    ブリーズライトのように小鼻を広げる」)。実際に使える長さ
+    (tape_pad_span。背面へ回り込む手前で打ち切られる)×帯の幅を左右2枚
+    ぶん。帯は緩く湾曲しているが、貼り代の範囲(6mm程度)では平面近似で
+    足りる。
+    """
+    start, end = tape_pad_span(params, frame.bridge_y, frame.tab_side_ratio)
+    return 2 * (end - start) * frame.bridge_width
+
+
+def tape_outward_ratio(frame: FrameParams, params: NoseParams) -> float:
+    """貼り代の面が、平均してどれだけ外(+x、小鼻を開く向き)を向いているかを
+    0〜1で返す。
+
+    帯が曲げ戻ろうとする力のうち、小鼻を実際に外へ開くのに使えるのは
+    この向きの成分だけ(ユーザー指摘「ブリーズライトのような、鼻腔を
+    広げる役割にならないといけない」)。拡張力(evaluation._extension_force)
+    にそのまま掛ける。
+    """
+    outline, arc = _side_outline(params, frame.bridge_y)
+    start, end = tape_pad_span(params, frame.bridge_y, frame.tab_side_ratio)
+    if end <= start:
+        return 0.0
+    outward = _outline_normal_x(outline)
+    middles = (arc[:-1] + arc[1:]) / 2
+    lengths = np.diff(arc)
+    inside = (middles >= start) & (middles <= end)
+    if not np.any(inside):
+        return float(np.interp((start + end) / 2, middles, outward))
+    return float(np.average(outward[inside], weights=lengths[inside]))
+
+
+def tape_area_margin(frame: FrameParams, params: NoseParams) -> float:
+    """貼り代の面積が_MIN_TAPE_AREAを下回っていないかを返す
+    (正=不足量、0以下=十分)。
+    """
+    return _MIN_TAPE_AREA - tape_pad_area(frame, params)
+
+
+def validate_tape_area(frame: FrameParams, params: NoseParams) -> None:
+    """tape_area_marginが正(=違反)の場合に例外を送出する。"""
+    margin = tape_area_margin(frame, params)
+    if margin > _MARGIN_TOLERANCE:
+        raise ValueError(
+            f"両面テープの貼り代({tape_pad_area(frame, params):.1f}mm^2)が最小値"
+            f"({_MIN_TAPE_AREA}mm^2)に{margin:.1f}mm^2足りない。bridge_widthを"
+            "大きくするか、tab_side_ratioを小さくすること"
+        )
+
+
+def tab_thickness_margin(frame: FrameParams) -> float:
+    """連結部と帯本体の厚みが、印刷・嵌め込みに耐えるかを返す
+    (正=不足量、0以下=十分。厳しい方)。
+
+    - 連結部(パッドを含む厚み)が_MIN_TAB_THICKNESS以上か
+    - 帯本体(テープを貼る薄い部分)が_MIN_BRIDGE_THICKNESS以上か
+
+    以前は連結部だけを見ていたが、パッドの厚みを固定値にした時点で
+    この値は常にちょうど0(許容誤差でかろうじて合格)になり、制約として
+    何も判定しなくなっていた。実際に探索変数で変わる帯本体の厚みも
+    一緒に見る。
+    """
+    return max(
+        _MIN_TAB_THICKNESS - _tab_pad_thickness(frame),
+        _MIN_BRIDGE_THICKNESS - frame.bridge_thickness,
+    )
 
 
 def validate_tab_thickness(frame: FrameParams) -> None:
@@ -1364,8 +1839,9 @@ def validate_tab_thickness(frame: FrameParams) -> None:
     margin = tab_thickness_margin(frame)
     if margin > _MARGIN_TOLERANCE:
         raise ValueError(
-            f"bridge_thickness({frame.bridge_thickness})がタブの最小の厚み"
-            f"({_MIN_TAB_THICKNESS}mm)に{margin:.3f}mm足りない"
+            f"連結部({_tab_pad_thickness(frame):.2f}mm≧{_MIN_TAB_THICKNESS}mm)または"
+            f"帯本体({frame.bridge_thickness:.2f}mm≧{_MIN_BRIDGE_THICKNESS}mm)の厚みが"
+            f"{margin:.3f}mm足りない"
         )
 
 
@@ -1443,14 +1919,15 @@ def build_bridge_piece(frame: FrameParams, params: NoseParams) -> trimesh.Trimes
     validate_tab_retention(frame)
     validate_tab_fit(frame, params)
     body = build_nose_body(params)
-    validate_curvature(frame, bridge_points(body, params))
+    validate_joint_access(frame, params, body)
+    validate_curvature(
+        frame, bridge_points(body, params, frame.bridge_y, frame.tab_side_ratio)
+    )
     validate_bridge_clearance(frame, params, body)
 
-    ribbon = _to_manifold(
-        _ribbon_mesh(body, params, frame.bridge_width, frame.bridge_thickness)
-    )
+    ribbon = _to_manifold(_ribbon_mesh(body, params, frame))
     slots = [
-        _tab_slot(_tab_frame(frame, params, body, side), frame.bridge_thickness)
+        _tab_slot(_tab_frame(frame, params, body, side), _tab_pad_thickness(frame))
         for side in (-1, 1)
     ]
     mesh = _to_trimesh(Manifold.batch_boolean([ribbon, *slots], OpType.Subtract))
@@ -1475,6 +1952,7 @@ def build_leg_piece(
     validate_tab_retention(frame)
     validate_tab_fit(frame, params)
     body = build_nose_body(params)
+    validate_joint_access(frame, params, body)
     tab = _tab_frame(frame, params, body, side)
     collar = _collar_geometry(frame, plug, params, side)
     rod = _rod_path(frame, params, body, tab, collar, side)
@@ -1483,10 +1961,9 @@ def build_leg_piece(
     validate_collar_position(plug, params, collar, side)
     validate_lens_protrusion([rod], [collar])
     validate_rod_thickness([rod])
+    validate_rod_kink([rod])
 
-    ribbon = _to_manifold(
-        _ribbon_mesh(body, params, frame.bridge_width, frame.bridge_thickness)
-    )
+    ribbon = _to_manifold(_ribbon_mesh(body, params, frame))
     tab_solid = ribbon ^ _tab_prism(tab, 0.0)
     lens = _to_manifold(_collar_mesh(collar))
     mesh = _to_trimesh(
