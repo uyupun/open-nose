@@ -1,7 +1,7 @@
 """NSGA-II(pymoo)による拡張ブリッジ型フレーム形状の多目的最適化スクリプト。
 
 evaluate_frame/constraint_values(scripts/dilator/evaluation.py)をpymooの
-Problemでラップし、FrameParamsの6設計変数を探索してパレートフロントを
+Problemでラップし、FrameParamsの8設計変数を探索してパレートフロントを
 求める。可視化・結果表示はcommons/report.py側の責務とし、このファイルは
 実行(FrameProblemの定義とminimize()の呼び出し)だけを持つ
 (earrings/spiral.optimize.pyと同じ構成)。
@@ -27,10 +27,9 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   (1/natural_radiusが0に近づくため)、実質的な効果が頭打ちになる水準の
   暫定値
 - bridge_width: 実際のブリーズライトの幅の水準に近づけた範囲(下限3.8mm、
-  上限5.0mm)。下限は、嵌め込みのスロット(首+頭+はめあい+周りに残す肉=
-  1.2+1.7+0.15+0.8=3.85mm)が帯の幅に収まる必要(tab_fit_margin)と、
-  両面テープの貼り代の面積(tape_area_margin、幅×貼り代長さ×2が
-  _MIN_TAPE_AREA=48mm^2以上)から決まる。ユーザー指摘(「縦が長すぎる、鼻にフィットする感じに」)を
+  上限5.0mm)。下限は、連結部のクリップの突起と丸穴が帯の幅に収まる
+  必要(clip_fit_margin)と、両面テープの貼り代の面積(tape_area_margin、
+  幅×貼り代長さ×2が_MIN_TAPE_AREA以上)から決まる。ユーザー指摘(「縦が長すぎる、鼻にフィットする感じに」)を
   受けて、以前の上限(7.0mm、鼻翼の隆起commons.nose_model._ALAE_BUMP_SPAN
   ≈7mmに合わせた値)から縮めた。なお、bridge_widthはextension_force
   (∝width)とpain(∝thickness^3/length^3、widthはforce/areaの計算で
@@ -43,22 +42,35 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   水準。ユーザー要望「アーチをもう少し横に長く、かつ薄くしたい。厚さは
   1mmくらい。両端に医療用両面テープを貼ってブリーズライトのように使う」
   を受けて0.8〜1.4mmにした(印刷・嵌め込みに耐える厚みは、連結部だけ
-  局所的に厚くするパッド(frame_model._TAB_PAD_THICKNESS=2.4mm)で確保
+  以前は連結部だけ局所的に厚くするパッドで確保していたが、連結部をクリップに
+  したいまは帯は一枚板のまま
   するので、帯本体はテープが貼れる薄さにできる)。下限0.8mmはFDMの
   0.2mm積層で4層、上限1.4mmは「1mmくらい」の幅
-- tab_side_ratio: 連結部(タブ・スロット)を、断面の直線の辺のどこに置くか
-  (0=鼻の正面寄りの端、1=背面角の手前)。以前は定数0.75だったが、ユーザー
+- tab_side_ratio: 帯の端(円弧の端、=貼り代の位置)を、断面の側面の輪郭の
+  どこに置くか(直線の辺の長さを1とした弧長。0=鼻の正面寄りの端、1=背面角
+  の手前、1を超えると背面角の丸みに入る)。連結部のクリップは
+  この端から少し内側に付く。以前は定数0.75だったが、ユーザー
   指摘「接続部分がもう少し外側にあってもいい。今は鼻の正面に沿っていて、
   メガネをしていると付けづらそう」を受けて変数にした。下限0.85は
   joint_access_margin(鼻の側面への寄り)が効き始める水準(これより
-  正面寄りは、帯の高さによってはほぼ全滅する)、上限1.0は
-  直線の辺の外端(これを越えるとスロットが背面角の丸め弧にかかり、平らな
-  タブと帯の曲面が合わなくなる)
+  正面寄りは、帯の高さによってはほぼ全滅する)。帯を一定の曲率の円弧に
+  してからは、直線の辺の上(上限1.0)だけではアーチが短すぎた(ユーザー
+  指摘「アーチを前みたいに長く」。GAの解はbridge_y≈20でx=±9mm、以前は
+  鼻の側面を回り込んで±13mm)ため、背面角の丸みまで広げて1.10〜1.35にした
+  (弧長27〜35mm)。1.4前後で円弧が半円に達し、それより先は帯が鼻の
+  側面から大きく浮く
 - bridge_y: 帯を鼻のどの高さに貼るか(mm)。以前はframe_modelの定数
   (_BRIDGE_Y)で最適化の対象外だったが、装着位置は装着後の曲率半径と
   帯の経路長(=拡張力)・棒の長さ(=鼻栓の保持剛性と目立ち方)の
   すべてを左右するため探索変数にした。下限6.0mmは小鼻の隆起のあたり、
-  上限20.0mmは鼻筋の半ば(鼻の長さ52.2mmの4割)で、実測では
+  上限22.0mmは鼻筋の半ば(鼻の長さ52.2mmの4割)。その後、アーチを長く
+  保つため(tab_side_ratio参照。鼻筋側ほど断面が細く、アーチが短くなる)
+  上限を18.0mmにし、鼻栓を下げて(frame_model.DILATOR_PLUG)棒が3mm
+  長くなったので下限を10.0mmに下げた。以前の下限13.0mmは、棒を
+  平たいブレードにしてアーチの面からリングの面へねじる造形(frame_model.
+  _blade_manifold)に必要な長さ(blade_twist_margin、31mm前後で3.0度/mmを
+  切る)から決まる。以前は6.0mmだったが、そこでは棒が25mmしかなく
+  「ねじれた板」に見えない。実測では
   extension_forceに+0.36、plug_holdに-0.78、inconspicuousnessに-0.67と、
   3目的すべてに効く唯一の変数になっている
 - leg_thickness: 当初はearrings.optimize.pyのring_thicknessと同じ範囲
@@ -95,21 +107,14 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   ため、要求する太さ(rod_thickness_margin、直径1.8mm以上)をわずかな余裕を
   持って満たす水準から決めた。つまりこの変数は、レンズの厚みと棒の太さを
   同時に決める一番効くつまみになっている
-- tab_head_oversize: 嵌め込み(ジョイントマット状のタブとスロット)の
-  矢じりの張り出し量(片側、mm)。ユーザーのスケッチに沿って、帯の下縁の
-  スロットへ平らなタブを押し込む構造にしたときの「返し」(抜け止めの
-  引っかかり)の大きさ。実際に引っかかる量は、スロットをタブより太らせる
-  はめあい公差(frame_model._TAB_CLEARANCE=0.15mm)を引いた残りなので、
-  細かい印刷でも確実に嵌まるようはめあいを0.1→0.15mmへ広げ、さらに返しの
-  最小値も0.2→0.3mm(_MIN_TAB_RETENTION、ユーザー要望「まだ太くして
-  欲しい」)へ上げた。範囲は0.35〜0.85mmで、下限側はtab_retention_margin
-  (引っかかり不足、実測の違反率19.5%)、上限側はtab_fit_margin
-  (スロットが帯に収まらない)が弾く。
-  引っかかりが足りない組み合わせはtab_retention_marginが弾く。
-  tab_head_oversizeは目的(extension_force・pain・inconspicuousness)の
-  いずれにも現れないため、GAは範囲内のどの値も等しく良いとみなす。ただし
-  大きいほどスロットも大きくなり、帯に収まらなくなる(tab_fit_marginが
-  弾く)ので、bridge_width・leg_thicknessとの組み合わせでは制約を受ける
+- clip_detent: 連結部(エッジクリップ)の位置決め突起の高さ(mm)。連結部を
+  矢じりタブ+スロットから、帯の下縁を挟むクリップに変えた(ユーザーが採用
+  した案1)のに伴い、tab_head_oversize(矢じりの張り出し量)から置き換えた。
+  高いほど帯の丸穴に深くかかって外れにくい(clip_retention_margin、引っかかり
+  0.2mm以上)が、着脱のとき外側の顎が大きく開いて折れやすい
+  (clip_strain_margin、付け根のひずみ3%以下)。後者は帯の幅(=顎の長さ)にも
+  依存するので、bridge_widthとの組み合わせで上限が決まる。範囲0.2〜0.6mmは、
+  下側・上側をそれぞれ2つの制約が実際に弾く幅
 """
 
 import argparse
@@ -132,6 +137,7 @@ from commons.report import SortKeys, plot_evolution, print_summary  # noqa: E402
 from dilator.evaluation import constraint_values, evaluate_frame  # noqa: E402
 from dilator.export_model import OUTPUT_DIR  # noqa: E402
 from dilator.frame_model import (  # noqa: E402
+    DILATOR_PLUG,
     FrameParams,
     validate_collar_no_overlap,
     validate_target_reach,
@@ -142,13 +148,13 @@ from dilator.frame_model import (  # noqa: E402
 # docstring参照
 _SEARCH_SPACE: list[tuple[str, float, float]] = [
     ("natural_radius", 6.0, 100.0),
-    ("tab_side_ratio", 0.90, 1.0),
-    ("bridge_y", 6.0, 20.0),
+    ("tab_side_ratio", 1.10, 1.35),
+    ("bridge_y", 10.0, 18.0),
     ("bridge_width", 3.8, 5.0),
     ("bridge_thickness", 0.8, 1.4),
     ("leg_thickness", 2.0, 4.0),
     ("collar_length", 1.9, 2.2),
-    ("tab_head_oversize", 0.35, 0.85),
+    ("clip_detent", 0.2, 0.6),
 ]
 _VAR_NAMES = [name for name, _, _ in _SEARCH_SPACE]
 _XL = np.array([lo for _, lo, _ in _SEARCH_SPACE])
@@ -182,7 +188,7 @@ _X_COLUMNS = [
     ("bridge_t", 9),
     ("leg_t", 7),
     ("collar_l", 9),
-    ("tab_ovsz", 9),
+    ("detent", 8),
 ]
 _F_COLUMNS = [("force", 8), ("hold", 8), ("inconspic.", 11)]
 
@@ -196,7 +202,7 @@ class FrameProblem(Problem):
         validate_target_reach(plug, nose)
         validate_collar_no_overlap(plug, nose)
 
-        super().__init__(n_var=8, n_obj=3, n_ieq_constr=14, xl=_XL, xu=_XU)
+        super().__init__(n_var=8, n_obj=3, n_ieq_constr=16, xl=_XL, xu=_XU)
         self.plug = plug
         self.nose = nose
 
@@ -234,7 +240,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
 
-    problem = FrameProblem(PlugParams(), NoseParams())
+    problem = FrameProblem(DILATOR_PLUG, NoseParams())
     algorithm = NSGA2(pop_size=args.pop_size)
     res = minimize(
         problem,

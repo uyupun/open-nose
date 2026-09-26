@@ -66,9 +66,80 @@ def load_for_viewer(path) -> trimesh.Scene:
     return order_for_viewer(trimesh.load(path, force="scene"))
 
 
+# ビューアのウィンドウを画面のどれだけの大きさで開くか(短い方の辺に対する
+# 比率)。trimeshの既定は1800x1350pxで、これは実際の画面(実測1512x982px)
+# より大きく、はみ出した状態で開いてしまう
+WINDOW_SCREEN_RATIO = 0.8
+# ウィンドウの大きさ(px)。画面の大きさが取れなかったときに使う
+FALLBACK_RESOLUTION = (1000, 800)
+
+
+def _window_resolution() -> tuple[int, int]:
+    """画面に収まるウィンドウの大きさ(px)を返す。"""
+    try:
+        import pyglet
+
+        screen = pyglet.canvas.get_display().get_default_screen()
+        side = int(min(screen.width, screen.height) * WINDOW_SCREEN_RATIO)
+        return (int(side * 4 / 3), side)
+    except Exception:
+        return FALLBACK_RESOLUTION
+
+
+def _viewer_class():
+    """マウスのドラッグで確実に回転するSceneViewerのサブクラスを返す。
+
+    trimeshのビューアは、押した瞬間(on_mouse_press)にトラックボールの起点を
+    登録し、ドラッグ中はその起点からの差分で回転させる。起点が登録されて
+    いないと、trimesh.viewer.trackball.Tragball.dragは差分を0として扱い、
+    ドラッグが完全に無効になる(trimesh側のコメントにも「down eventが何らかの
+    理由で発火しなかった場合はno-opにする」とある)。実機(macOS 26 +
+    pyglet 1.5.31)では実際にこの状態で、ホイールのズーム(押下を必要と
+    しない)だけが効き、上下左右の回転がまったくできなかった。
+
+    pygletはドラッグのイベントで移動量(dx, dy)も渡してくれるので、
+    1回のドラッグを「直前の位置から今の位置への小さなドラッグ」として
+    その場で組み立て直す。押下イベントが届くかどうかに依存しなくなる。
+    """
+    import numpy as np
+    import pyglet
+    from trimesh.viewer.trackball import Trackball
+    from trimesh.viewer.windowed import SceneViewer
+
+    class DragFixSceneViewer(SceneViewer):
+        def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
+            ball = self.view["ball"]
+            ball.set_state(Trackball.STATE_ROTATE)
+            if buttons == pyglet.window.mouse.LEFT:
+                ctrl = modifiers & pyglet.window.key.MOD_CTRL
+                shift = modifiers & pyglet.window.key.MOD_SHIFT
+                if ctrl and shift:
+                    ball.set_state(Trackball.STATE_ZOOM)
+                elif shift:
+                    ball.set_state(Trackball.STATE_ROLL)
+                elif ctrl:
+                    ball.set_state(Trackball.STATE_PAN)
+            elif buttons == pyglet.window.mouse.MIDDLE:
+                ball.set_state(Trackball.STATE_PAN)
+            elif buttons == pyglet.window.mouse.RIGHT:
+                ball.set_state(Trackball.STATE_ZOOM)
+            ball.down(np.array([x - dx, y - dy]))
+            ball.drag(np.array([x, y]))
+            self.scene.camera_transform = ball.pose
+
+    return DragFixSceneViewer
+
+
 def show_scene(scene: trimesh.Scene) -> None:
-    """カメラ位置を調整してからインタラクティブビューアを開く。"""
+    """カメラ位置とウィンドウの大きさを調整してインタラクティブビューアを開く。
+
+    操作: ドラッグで回転 / ホイールでズーム / ctrl+ドラッグで平行移動 /
+    shift+ドラッグでロール。キーは z=視点リセット、w=ワイヤーフレーム、
+    a=座標軸、g=グリッド、f=フルスクリーン、q=終了。
+    """
     camera_transform = scene.camera_transform.copy()
     camera_transform[1, 3] += CAMERA_Y_OFFSET_RATIO * scene.extents[1]
     scene.camera_transform = camera_transform
-    scene.show()
+    resolution = _window_resolution()
+    scene.camera.resolution = resolution
+    _viewer_class()(scene, resolution=resolution)

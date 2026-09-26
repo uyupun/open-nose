@@ -45,6 +45,10 @@ class PlugParams:
     # nostril_gapもこれに合わせて広げてある
     diameter: float = 10.0
     length: float = 12.0
+    # 鼻孔中心からのy方向のずらし量(_PLUG_Y_OFFSET参照)。鼻栓が鼻から
+    # どれだけ飛び出しているかで設計ごとに変えられるようにしたもの
+    # (dilator.frame_model.DILATOR_PLUG参照)。既定値は従来と同じ
+    y_offset: float = _PLUG_Y_OFFSET
 
     def __post_init__(self) -> None:
         for name in ("diameter", "length"):
@@ -53,15 +57,18 @@ class PlugParams:
                 raise ValueError(f"{name} は正の値にすること: {value}")
 
 
-def plug_center(gap: float, depth_front: float, side: Literal[-1, 1]) -> np.ndarray:
+def plug_center(
+    gap: float, depth_front: float, side: Literal[-1, 1], y_offset: float = _PLUG_Y_OFFSET
+) -> np.ndarray:
     """指定側の鼻栓プレースホルダーの中心座標を返す。
 
-    形状(diameter/length)には依存しないためPlugParamsは受け取らない。
+    形状(diameter/length)には依存しないためPlugParamsは受け取らない
+    (y方向の位置はPlugParams.y_offsetをy_offsetとして渡す)。
     frame_model側が保持部の目標位置として参照するために公開している。
     """
     x_pos = side * gap / 2
     z_pos = nostril_depth_z(depth_front)
-    return np.array([x_pos, _PLUG_Y_OFFSET, z_pos])
+    return np.array([x_pos, y_offset, z_pos])
 
 
 def plug_outer_end(
@@ -73,7 +80,7 @@ def plug_outer_end(
     中心からlength/2だけ-y方向にずらした点が露出端になる。frame_modelの
     保持部は、鼻孔の奥にあたる中心ではなくこの露出端を目標位置にする
     """
-    center = plug_center(gap, depth_front, side)
+    center = plug_center(gap, depth_front, side, plug.y_offset)
     return center - np.array([0.0, plug.length / 2, 0.0])
 
 
@@ -90,7 +97,7 @@ def _build_plug(
     mesh = trimesh.creation.cylinder(radius=plug.diameter / 2, height=plug.length)
     rotate_to_y = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
     mesh.apply_transform(rotate_to_y)
-    mesh.apply_translation(plug_center(gap, depth_front, side))
+    mesh.apply_translation(plug_center(gap, depth_front, side, plug.y_offset))
 
     return mesh
 

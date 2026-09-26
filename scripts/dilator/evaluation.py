@@ -25,26 +25,34 @@ earrings/spiral.evaluation.pyと同じ方針(本質的なトレードオフだ�
 extension_forceの定数倍(実測の相関+0.99)で、パレートフロントが3次元
 空間の1本の直線に退化していた。面圧はskin_pressure_margin(制約)へ移し、
 代わりに棒・レンズの役割(鼻栓の保持)をplug_holdとして目的に据えた。
-実測の相関はextension_force-plug_hold −0.37、extension_force-
-inconspicuousness −0.19、plug_hold-inconspicuousness +0.06で、3つとも
-独立した軸として働いている。
+実測の相関はextension_force-plug_hold −0.25、extension_force-
+inconspicuousness +0.07、plug_hold-inconspicuousness −0.64で、3つとも
+独立した軸として働いている(最後の組は、太い棒ほど硬いが目立つという
+トレードオフそのもの)。
 
-**制約(14個。FrameScore参照。すべて0以下であるべき)**
+**制約(16個。FrameScore参照。すべて0以下であるべき)**
 
 探索範囲(dilator/optimize._SEARCH_SPACE)からランダムに400件を評価した
 ときの違反率(=GAの探索で実際に効いている度合い):
 
-- 形が成立するかを決める、実際に効く制約: joint_access_margin(連結部が
-  鼻の正面に寄りすぎていないか。ユーザー指摘「メガネをしていると付け
-  づらそう」)・collar_clearance_margin 34.0%・
-  rod_thickness_margin 31.8%・tab_retention_margin 19.5%・
-  tape_area_margin 17.2%・rod_kink_margin 5.8%・skin_pressure_margin 5.8%・
-  tab_fit_margin 3.8%・leg_clearance_margin 2.8%・curvature_margin 0.2%
+- 形が成立するかを決める、実際に効く制約: rod_thickness_margin 51.5%・
+  skin_pressure_margin 34.2%・clip_skin_margin 33.8%・clip_strain_margin
+  26.8%・clip_retention_margin 23.5%・joint_access_margin 20.2%・
+  clip_fit_margin 6.2%・rod_kink_margin 1.8%
 - 安全網(この探索範囲では違反しないが、幾何の作り方を変えたときに
-  退行を検出する): bridge_clearance_margin・collar_position_margin・
-  lens_protrusion_margin・tab_thickness_margin。前の2つの改修では、この
-  種の制約が実際に「棒がレンズの穴を塞ぐ」「棒が0.4mmまで潰れる」と
-  いった退行を捕まえている
+  退行を検出する): curvature_margin・bridge_clearance_margin・
+  leg_clearance_margin・collar_clearance_margin・collar_position_margin・
+  lens_protrusion_margin・blade_twist_margin・tape_area_margin。この種の
+  制約は過去の改修で実際に「棒がレンズの穴を塞ぐ」「棒が0.4mmまで潰れる」
+  といった退行を捕まえている。leg_clearance(以前21%)とblade_twist(以前
+  30%)は、棒の経路を平滑化し、板のねじれを回転最小化フレームで均等に
+  配るようにしてから違反しなくなった(鼻から離す補正と平滑化を交互に
+  かけるので食い込まず、ねじれは経路の曲がりの分だけ少なくて済む)
+
+連結部をエッジクリップに変えたのに伴い、矢じりタブ用の3つ(tab_fit・
+tab_thickness・tab_retention)をクリップ用の3つ(clip_fit・clip_strain・
+clip_retention)に置き換え、クリップの内側の縁が肌に食い込む深さを見る
+clip_skin_marginを加えた。
 
 閾値はいずれも暫定値で、実際に印刷・装着しながら見直す前提。
 
@@ -86,8 +94,15 @@ inconspicuousness −0.19、plug_hold-inconspicuousness +0.06で、3つとも
   =GAから見て定数だったため、拡張力は実質bridge_thicknessだけの関数に
   なっていた。bridge_yを探索変数にしたことで、装着位置そのものも
   最適化の対象になる
+- **印刷する形が自然な形**。この式は、帯を曲率半径natural_radiusの形で
+  印刷し(frame_model.build_bridge_print_piece)、装着時に鼻の上の円弧
+  (actual_radius)まで曲げることが前提。装着した形のまま印刷すると
+  たわみが0になり、この拡張力は出ない
 - **skin_pressure(面圧、制約)= 拡張力 / 貼り代の面積**。テープを貼る
-  面(frame_model.tape_pad_area、連結部より外側の帯の両端)にかかる面圧。
+  面(frame_model.tape_pad_area、帯の両端のうち肌から_TAPE_MAX_GAP以内の
+  区間)にかかる面圧。帯を一定の曲率の円弧にして(両端を鼻の角に沿って
+  丸めるのをやめて)からは、貼り代が両端の2〜3mmに縮んだため、この制約が
+  最もよく効く(探索範囲の一様サンプルで約8割が違反)。
   上限(_MAX_SKIN_PRESSURE)を超えると、痛みの前にテープが剥がれて力が
   肌へ伝わらない。以前はこれをpainとして目的にしていたが、拡張力・
   接触面積がどちらもbridge_widthに比例して約分され、実質extension_force
@@ -95,20 +110,24 @@ inconspicuousness −0.19、plug_hold-inconspicuousness +0.06で、3つとも
 
 ## plug_hold(鼻栓の保持剛性)の構成
 
-plug_hold = 左右の棒を「タブ側が固定端・レンズ側が荷重点の片持ち梁」と
-みなしたバネ定数の合計(_plug_hold・_rod_stiffness)。棒は太さが場所
-ごとに変わる(frame_model._rod_radii)ため、一様断面の公式ではなく
-カスティリアノの定理 δ/P = ∫ x^2/(E I(x)) dx を点列の上で数値積分して
-その逆数を取る。
+plug_hold = 左右の棒を「クリップ側が固定端・リングの中心が荷重点」の
+3次元の曲がり梁とみなし、リングをいちばんたわみやすい向き(x・y・zの
+うち最悪)に押したときのバネ定数の合計(_plug_hold・_rod_stiffness)。
+カスティリアノの定理で、各点の曲げモーメントを断面の幅の向き・厚みの
+向き・経路の向きに分解して積分する:
 
-棒が柔らかいとレンズが振られて鼻栓がぐらつく。太く短い棒ほど高いが、
+    δ/P = ∫ [ M_w²/I_w + M_t²/I_t + M_s²/(G/E·J) ] ds
+
+棒は平たいブレードで、経路に沿ってねじれる(アーチの面→リングの面)。
+以前は全長を弱軸だけで測っていたため、ねじれて強い向きで受けている
+区間の剛性を捨てていた(実測: 同じ形で3.8→16.1、ただしこれはy方向だけの
+値で、最悪の向きで測ると8〜12程度)。3次元で分解すると、どこでどちら向きに
+ねじるかがそのまま保持剛性に効く。
+
+棒が柔らかいとリングが振られて鼻栓がぐらつく。太い棒ほど高いが、
 そのぶん目立つ(inconspicuousness)ので、leg_thicknessと装着位置
 (bridge_y、棒の長さを決める)に本質的なトレードオフができる。実測の
-相関はleg_thickness +0.67、bridge_y -0.74。
-
-この積分は固定端(タブの首)側の細さに強く効く。タブの首の中では棒は
-連結部の厚み(_tab_pad_thickness)までしか太くできないため、「帯を薄く
-してもパッドで連結部だけ厚くする」という形の効果もここに現れる。
+相関はleg_thickness +0.92、bridge_y -0.57。
 
 ## inconspicuousness(目立たなさ)の構成
 
@@ -122,8 +141,14 @@ inconspicuousness = -(顔の正面から見たフレームの投影面積mm^2)
 相関-1.000)にすぎず、実際にはいちばん目立つ「鼻の側面を約42mm下る棒」と
 「鼻孔のレンズ」が評価に全く入らないうえ、bridge_widthも目的に現れない
 ためGAが常に探索範囲の上限へ張り付いていた(パレートフロントの全個体が
-bridge_width≈上限)。投影面積にすることで、bridge_width(実測相関-0.39)・
-leg_thickness(-0.64)・bridge_y(-0.64、高い位置ほど棒が長くなる)が
+bridge_width≈上限)。棒は平たいブレードとして、各区間の断面を正面から見た向きへ射影した
+見かけの幅で測り、リングは鼻中隔側を開いたC字の分だけ細く、連結部の
+クリップの影(clip_frontal_area)も加える(以前はブレードを丸棒、リングを
+閉じた輪として数え、クリップは数えていなかった。実測で片側あたり
+クリップ20mm^2・リングの開口-4.7mm^2の差)。
+
+投影面積にすることで、bridge_width(実測相関-0.36)・
+leg_thickness(-0.84)・bridge_y(-0.18、高い位置ほど棒が長くなる)が
 「太く/長くすれば機能は上がるが目立つ」という本来のトレードオフとして
 効くようになる。なおcollar_lengthだけは目的にほとんど現れず(±0.06)、
 rod_thickness_margin・collar_clearance_marginという制約が実質的に
@@ -138,7 +163,13 @@ import numpy as np
 from commons.nose_model import NoseParams, build_nose_body
 from commons.plug_model import PlugParams
 from dilator.frame_model import (
+    _BLADE_ASPECT,
+    _OPEN_RING_GAP_DEG,
     CollarGeometry,
+    TabFrame,
+    _blade_frames,
+    clip_frontal_area,
+    clip_skin_margin,
     FrameParams,
     RodPath,
     bridge_clearance_margin,
@@ -154,11 +185,12 @@ from dilator.frame_model import (
     joint_access_margin,
     leg_clearance_margin,
     lens_protrusion_margin,
+    blade_twist_margin,
     rod_kink_margin,
     rod_thickness_margin,
-    tab_fit_margin,
-    tab_retention_margin,
-    tab_thickness_margin,
+    clip_fit_margin,
+    clip_retention_margin,
+    clip_strain_margin,
     validate_collar_no_overlap,
     validate_target_reach,
 )
@@ -169,6 +201,9 @@ from dilator.frame_model import (
 _REF_BRIDGE_WIDTH = 6.0
 _REF_BRIDGE_THICKNESS = 1.0
 _REF_BRIDGE_LENGTH = 23.5
+# ねじりの剛性に使う、せん断弾性率とヤング率の比(G/E=1/(2(1+ν))、
+# 樹脂のポアソン比ν≈0.35)
+_SHEAR_RATIO = 1 / 2.7
 _REF_STIFFNESS = (
     _REF_BRIDGE_WIDTH * _REF_BRIDGE_THICKNESS**3 / 12
 ) / _REF_BRIDGE_LENGTH**3
@@ -180,29 +215,65 @@ _REF_STIFFNESS = (
 _MAX_SKIN_PRESSURE = 0.0015
 
 
-def _rod_stiffness(rod: RodPath) -> float:
-    """棒1本を、タブ側を固定端・レンズ側を荷重点とする片持ち梁とみなした
-    ときのバネ剛性(E=1、単位mm)を返す。
+def _rod_stiffness(rod: RodPath, tab: TabFrame, collar: CollarGeometry) -> float:
+    """片側の棒(ブレード)で、リングをいちばんたわみやすい向きに押したときの
+    バネ定数(E=1、単位mm)を返す。
 
-    棒は太さが場所ごとに変わる(_rod_radii)ため、一様断面の公式(3EI/L^3)
-    ではなく、カスティリアノの定理によるたわみ
-    δ/P = ∫ x^2 / (E I(x)) dx(xは荷重点=レンズ側からの距離)を、点列
-    (RodPath)の上で数値積分してその逆数を取る。定数係数は帯側と同じく
-    省く(_REF_STIFFNESSで正規化するため)。
+    棒を、クリップ側を固定端・リングの中心を荷重点とする3次元の曲がり梁と
+    みなし、カスティリアノの定理でたわみを求めてその逆数を取る:
 
-    この積分はxが大きいところ、つまり固定端(タブの首)側の細さに強く
-    効く。タブの首の中では棒はbridge_thicknessまでしか太くできない
-    (_rod_radii)ため、「アーチが薄いと、棒が太くても根元で力が逃げる」
-    という実際の効き方がそのまま評価に入る。
+        δ/P = ∫ [ M_w²/I_w + M_t²/I_t + M_s²/(G/E·J) ] ds
+
+    Mは各点での曲げモーメント(= 荷重点までの腕 × 荷重の向き)で、断面の
+    幅の向き(w)・厚みの向き(t)・経路の向き(s)に分解する。ブレードの断面は
+    角丸長方形(幅=radii*2、厚み=幅/_BLADE_ASPECT)なので
+    I_w=幅·厚み³/12(弱い)、I_t=厚み·幅³/12(強い)、ねじりはJ≈幅·厚み³/3。
+
+    以前は全長を弱軸のI_wだけで測っていた。ブレードは経路に沿ってねじれ、
+    場所によっては荷重に対して幅の向き(強い向き)で受けるので、実際より
+    弱く見積もっていたうえ、「どこでどちら向きにねじるか」が剛性にどう
+    効くかを評価できていなかった。3次元で分解すれば、ねじれの造形がそのまま
+    保持剛性に反映される。
+
+    荷重の向きはx・y・zの3通りを試し、いちばんたわむ(=いちばん弱い)向きの
+    値を返す。鼻栓の軸の向き(y)だけで押すと、縦に降りる棒の区間はほぼ
+    引っ張り・圧縮で受けて曲がらないため、棒の長さ(装着位置bridge_y)が
+    剛性に効かなくなった(実測: 相関-0.74→-0.08)。リングは鼻栓の出し入れ
+    だけでなく、顔に触れたときなど横からも押されるので、最も弱い向きで
+    評価する。
     """
     points, radii = rod.points, rod.radii
-    segment = np.linalg.norm(np.diff(points, axis=0), axis=1)
-    # 各区間の代表値(両端の平均)。xは末尾(レンズ側)からの距離
-    mid_radii = (radii[:-1] + radii[1:]) / 2
-    from_tip = np.concatenate([[0.0], np.cumsum(segment[::-1])])[::-1][:-1]
-    second_moment = np.pi * mid_radii**4 / 4
-    compliance = float(np.sum(from_tip**2 / second_moment * segment))
-    return 1.0 / compliance if compliance > 0 else np.inf
+    _, wide, thick = _blade_frames(
+        points, np.asarray(tab.u, dtype=float), np.array([0.0, 1.0, 0.0])
+    )
+    segments = np.diff(points, axis=0)
+    lengths = np.linalg.norm(segments, axis=1)
+    tangents = segments / np.maximum(lengths[:, None], 1e-9)
+    middles = (points[:-1] + points[1:]) / 2
+    width = (radii[:-1] + radii[1:])
+    thickness = width / _BLADE_ASPECT
+    i_weak = width * thickness**3 / 12
+    i_strong = thickness * width**3 / 12
+    torsion = width * thickness**3 / 3
+    load_point = np.array(
+        [collar.center_x, (collar.y_start + collar.y_end) / 2, collar.center_z]
+    )
+    w_mid = (wide[:-1] + wide[1:]) / 2
+    t_mid = (thick[:-1] + thick[1:]) / 2
+    worst = 0.0
+    for load in np.eye(3):
+        moment = np.cross(load_point - middles, load)
+        compliance = np.sum(
+            (
+                np.einsum("ij,ij->i", moment, w_mid) ** 2 / i_weak
+                + np.einsum("ij,ij->i", moment, t_mid) ** 2 / i_strong
+                + np.einsum("ij,ij->i", moment, tangents) ** 2
+                / (_SHEAR_RATIO * torsion)
+            )
+            * lengths
+        )
+        worst = max(worst, float(compliance))
+    return 1.0 / worst if worst > 0 else np.inf
 
 
 def _extension_force(
@@ -229,7 +300,9 @@ def _extension_force(
     return stiffness / _REF_STIFFNESS * deflection * tape_outward_ratio(frame, params)
 
 
-def _plug_hold(rods: list[RodPath]) -> float:
+def _plug_hold(
+    rods: list[RodPath], tabs: list[TabFrame], collars: list[CollarGeometry]
+) -> float:
     """鼻栓の保持剛性(機能性、最大化)。左右の棒を、タブ側を固定端・
     レンズ側を荷重点とする片持ち梁とみなしたときのバネ定数の合計
     (基準の帯の剛性=1で正規化)。
@@ -239,13 +312,20 @@ def _plug_hold(rods: list[RodPath]) -> float:
     leg_thicknessと装着位置(bridge_y、棒の長さを決める)に本質的な
     トレードオフを作る。
     """
-    return sum(_rod_stiffness(rod) for rod in rods) / _REF_STIFFNESS
+    return (
+        sum(
+            _rod_stiffness(rod, tab, collar)
+            for rod, tab, collar in zip(rods, tabs, collars)
+        )
+        / _REF_STIFFNESS
+    )
 
 
 def _visible_area(
     frame: FrameParams,
     bridge: list[np.ndarray],
     rods: list[RodPath],
+    tabs: list[TabFrame],
     collars: list[CollarGeometry],
 ) -> float:
     """フレームを顔の正面(x-y平面)から見たときの投影面積(mm^2)を返す。
@@ -254,18 +334,33 @@ def _visible_area(
     部品ごとの影の面積を単純に足す(重なりは無視する近似):
 
     - ブリッジ: 正面から見た経路長 × 帯の幅
-    - 棒: 各区間の正面から見た長さ × その区間の直径(太さが場所ごとに
-      変わるため、区間ごとに足す)
-    - レンズ: 筒を横から見た長方形(外径 × 厚み)
+    - 棒(ブレード): 各区間の正面から見た長さ × その区間の見かけの幅。
+      見かけの幅は、断面(幅・厚み)を正面から見た経路に垂直な向きへ射影した
+      長さで、ブレードが正面を向いてねじれている区間ほど太く見える
+    - リング: 筒を正面から見た長方形。鼻中隔側を_OPEN_RING_GAP_DEGだけ
+      開いたC字なので、横幅は外径×(1+cos(開口/2))
+    - クリップ: 帯の下縁を挟む箱(clip_frontal_area)
     """
     points = np.array(bridge)
     area = float(np.sum(np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)))
     area *= frame.bridge_width
-    for rod in rods:
-        segment = np.linalg.norm(np.diff(rod.points[:, :2], axis=0), axis=1)
-        area += float(np.sum(segment * (rod.radii[:-1] + rod.radii[1:])))
+    for rod, tab in zip(rods, tabs):
+        _, wide, thick = _blade_frames(
+            rod.points, np.asarray(tab.u, dtype=float), np.array([0.0, 1.0, 0.0])
+        )
+        step = np.diff(rod.points[:, :2], axis=0)
+        length = np.linalg.norm(step, axis=1)
+        across = np.stack([-step[:, 1], step[:, 0], np.zeros(len(step))], axis=1)
+        across /= np.maximum(length[:, None], 1e-9)
+        half_width = (rod.radii[:-1] + rod.radii[1:]) / 2
+        apparent = 2 * half_width * np.abs(np.einsum("ij,ij->i", wide[:-1], across)) + (
+            2 * half_width / _BLADE_ASPECT
+        ) * np.abs(np.einsum("ij,ij->i", thick[:-1], across))
+        area += float(np.sum(length * apparent))
+        area += clip_frontal_area(tab, frame)
+    open_half = np.radians(_OPEN_RING_GAP_DEG) / 2
     for collar in collars:
-        area += 2 * collar.r_outer * (collar.y_end - collar.y_start)
+        area += collar.r_outer * (1 + np.cos(open_half)) * (collar.y_end - collar.y_start)
     return area
 
 
@@ -283,7 +378,7 @@ class FrameScore:
     extension_force: float  # 機能性: 小鼻を広げる拡張力(基準の帯の剛性=1の相対値、最大化)
     plug_hold: float  # 機能性: 鼻栓の保持剛性(同じ正規化、最大化)
     inconspicuousness: float  # 意匠性: 目立たなさ(-正面から見た投影面積mm^2、最大化)
-    # 制約(14個。すべて0以下であるべき)
+    # 制約(16個。すべて0以下であるべき)
     curvature_margin: float  # natural_radiusが十分平らか(0以下であるべき)
     bridge_clearance_margin: float  # ブリッジのめり込み超過量(0以下であるべき)
     leg_clearance_margin: float  # 棒のめり込み超過量(0以下であるべき)
@@ -292,9 +387,11 @@ class FrameScore:
     lens_protrusion_margin: float  # 棒がレンズからはみ出していないか(0以下であるべき)
     rod_thickness_margin: float  # 棒の最も細いところが印刷できる太さか(0以下であるべき)
     rod_kink_margin: float  # 棒の曲がりが急すぎて自己交差していないか(0以下であるべき)
-    tab_fit_margin: float  # 嵌め込みのスロットが帯に収まるか(0以下であるべき)
-    tab_thickness_margin: float  # タブの厚みが足りているか(0以下であるべき)
-    tab_retention_margin: float  # 嵌め込みの返しが実際に引っかかるか(0以下であるべき)
+    blade_twist_margin: float  # ブレードのねじれが急すぎないか(0以下であるべき)
+    clip_fit_margin: float  # クリップと帯の穴が帯に収まるか(0以下であるべき)
+    clip_strain_margin: float  # 着脱時にクリップの顎が折れないか(0以下であるべき)
+    clip_retention_margin: float  # クリップの突起が帯の穴に十分かかるか(0以下であるべき)
+    clip_skin_margin: float  # クリップが肌に食い込みすぎないか(0以下であるべき)
     skin_pressure_margin: float  # 貼り代にかかる面圧が上限以内か(0以下であるべき)
     tape_area_margin: float  # 両面テープの貼り代の面積が足りるか(0以下であるべき)
     joint_access_margin: float  # 連結部が鼻の側面に寄っているか(0以下であるべき)
@@ -318,9 +415,11 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.lens_protrusion_margin - _MARGIN_EPSILON,
         score.rod_thickness_margin - _MARGIN_EPSILON,
         score.rod_kink_margin - _MARGIN_EPSILON,
-        score.tab_fit_margin - _MARGIN_EPSILON,
-        score.tab_thickness_margin - _MARGIN_EPSILON,
-        score.tab_retention_margin - _MARGIN_EPSILON,
+        score.blade_twist_margin - _MARGIN_EPSILON,
+        score.clip_fit_margin - _MARGIN_EPSILON,
+        score.clip_strain_margin - _MARGIN_EPSILON,
+        score.clip_retention_margin - _MARGIN_EPSILON,
+        score.clip_skin_margin - _MARGIN_EPSILON,
         score.skin_pressure_margin - _MARGIN_EPSILON,
         score.tape_area_margin - _MARGIN_EPSILON,
         score.joint_access_margin - _MARGIN_EPSILON,
@@ -344,20 +443,23 @@ def evaluate_frame(
     bridge = bridge_points(body, params, frame.bridge_y, frame.tab_side_ratio)
     actual_radius, path_length = bridge_curvature(bridge)
 
-    _, left_rod, right_rod, left_collar, right_collar = build_paths(frame, plug, params, body)
+    _, left_rod, right_rod, left_collar, right_collar, left_tab, right_tab = (
+        build_paths(frame, plug, params, body)
+    )
     rods = [left_rod, right_rod]
     collars = [left_collar, right_collar]
+    tabs = [left_tab, right_tab]
 
     force = _extension_force(frame, params, actual_radius, path_length)
     pad_area = tape_pad_area(frame, params)
 
     return FrameScore(
         extension_force=force,
-        plug_hold=_plug_hold(rods),
-        inconspicuousness=-_visible_area(frame, bridge, rods, collars),
+        plug_hold=_plug_hold(rods, tabs, collars),
+        inconspicuousness=-_visible_area(frame, bridge, rods, tabs, collars),
         curvature_margin=curvature_margin(frame, bridge),
         bridge_clearance_margin=bridge_clearance_margin(frame, params, body),
-        leg_clearance_margin=leg_clearance_margin(rods, body),
+        leg_clearance_margin=leg_clearance_margin(rods, tabs, body),
         collar_clearance_margin=collar_clearance_margin(collars, body),
         collar_position_margin=max(
             collar_position_margin(plug, params, left_collar, -1),
@@ -366,9 +468,11 @@ def evaluate_frame(
         lens_protrusion_margin=lens_protrusion_margin(rods, collars),
         rod_thickness_margin=rod_thickness_margin(rods),
         rod_kink_margin=rod_kink_margin(rods),
-        tab_fit_margin=tab_fit_margin(frame, params),
-        tab_thickness_margin=tab_thickness_margin(frame),
-        tab_retention_margin=tab_retention_margin(frame),
+        blade_twist_margin=blade_twist_margin(rods, tabs),
+        clip_fit_margin=clip_fit_margin(frame, params),
+        clip_strain_margin=clip_strain_margin(frame),
+        clip_retention_margin=clip_retention_margin(frame),
+        clip_skin_margin=clip_skin_margin(frame, tabs, body),
         skin_pressure_margin=force / pad_area - _MAX_SKIN_PRESSURE,
         tape_area_margin=tape_area_margin(frame, params),
         joint_access_margin=joint_access_margin(frame, params, body),

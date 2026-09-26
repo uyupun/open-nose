@@ -3,8 +3,8 @@
 import trimesh
 
 from commons.nose_model import NoseParams, build_nose_body
-from commons.plug_model import PlugParams, build_plug_pair
-from dilator.frame_model import FrameParams, build_bridge_piece, build_leg_piece
+from commons.plug_model import build_plug_pair
+from dilator.frame_model import DILATOR_PLUG, FrameParams, build_bridge_piece, build_leg_piece
 
 
 def build_full_scene(frame: FrameParams | None = None) -> trimesh.Scene:
@@ -25,7 +25,7 @@ def build_full_scene(frame: FrameParams | None = None) -> trimesh.Scene:
     params = NoseParams()
     body = build_nose_body(params)
 
-    plug = PlugParams()
+    plug = DILATOR_PLUG
     plug_left, plug_right = build_plug_pair(
         plug, gap=params.nostril_gap, depth_front=params.tip_depth_front
     )
