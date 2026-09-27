@@ -25,10 +25,16 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   変わるので、下限付近ではcurvature_marginが実際に効く)。上限100.0mmは、これ以上平らにしてもdeflection
   (1/actual_radius - 1/natural_radius)の増分が小さくなり
   (1/natural_radiusが0に近づくため)、実質的な効果が頭打ちになる水準の
-  暫定値
+  暫定値だった。その後、印刷する帯を「装着した形の曲がりをactual_radius/
+  natural_radiusの割合に弱めた形」にした(frame_model._print_profile)ため、
+  natural_radiusが大きいほど印刷した帯は平らになる。GAは拡張力のために
+  上限へ寄せ、帯がほぼ平らな板になって「アーチ状が平べったすぎる。前と
+  同じくらいのアーチ状がいい」(ユーザー指摘)となったので、14.0〜26.0mm
+  (装着時の曲率半径は約9.5〜13mmなので、印刷した帯の曲がりは装着時の
+  約4〜9割)にした
 - bridge_width: 実際のブリーズライトの幅の水準に近づけた範囲(下限3.8mm、
   上限5.0mm)。下限は、連結部のクリップの突起と丸穴が帯の幅に収まる
-  必要(clip_fit_margin)と、両面テープの貼り代の面積(tape_area_margin、
+  必要(cuff_fit_margin)と、両面テープの貼り代の面積(tape_area_margin、
   幅×貼り代長さ×2が_MIN_TAPE_AREA以上)から決まる。ユーザー指摘(「縦が長すぎる、鼻にフィットする感じに」)を
   受けて、以前の上限(7.0mm、鼻翼の隆起commons.nose_model._ALAE_BUMP_SPAN
   ≈7mmに合わせた値)から縮めた。なお、bridge_widthはextension_force
@@ -51,21 +57,27 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   の手前、1を超えると背面角の丸みに入る)。連結部のクリップは
   この端から少し内側に付く。以前は定数0.75だったが、ユーザー
   指摘「接続部分がもう少し外側にあってもいい。今は鼻の正面に沿っていて、
-  メガネをしていると付けづらそう」を受けて変数にした。下限0.85は
+  メガネをしていると付けづらそう」を受けて変数にした。帯は鼻の前面と
+  側面に沿い、1を超えるぶんは背面角の丸みに沿わせず直線の辺の向きの
+  まままっすぐ伸ばす(frame_model._bridge_profile)。下限0.85は
   joint_access_margin(鼻の側面への寄り)が効き始める水準(これより
   正面寄りは、帯の高さによってはほぼ全滅する)。帯を一定の曲率の円弧に
   してからは、直線の辺の上(上限1.0)だけではアーチが短すぎた(ユーザー
   指摘「アーチを前みたいに長く」。GAの解はbridge_y≈20でx=±9mm、以前は
   鼻の側面を回り込んで±13mm)ため、背面角の丸みまで広げて1.10〜1.35にした
-  (弧長27〜35mm)。1.4前後で円弧が半円に達し、それより先は帯が鼻の
-  側面から大きく浮く
+  (弧長27〜35mm)。帯を鼻に沿うアーチ+まっすぐな端に改めてからは
+  1.2〜1.4(弧長27〜33mm)。帯は長いほど曲げ戻りの力が弱くなる(剛性が
+  長さの3乗に反比例)ため、1.0から探索させるとGAは下限(弧長約24mm)に
+  寄せ、アーチが短く戻ってしまった。1.4で端の浮きが1.5mm前後になり、
+  それより先は貼り代が減っていく
 - bridge_y: 帯を鼻のどの高さに貼るか(mm)。以前はframe_modelの定数
   (_BRIDGE_Y)で最適化の対象外だったが、装着位置は装着後の曲率半径と
   帯の経路長(=拡張力)・棒の長さ(=鼻栓の保持剛性と目立ち方)の
   すべてを左右するため探索変数にした。下限6.0mmは小鼻の隆起のあたり、
   上限22.0mmは鼻筋の半ば(鼻の長さ52.2mmの4割)。その後、アーチを長く
   保つため(tab_side_ratio参照。鼻筋側ほど断面が細く、アーチが短くなる)
-  上限を18.0mmにし、鼻栓を下げて(frame_model.DILATOR_PLUG)棒が3mm
+  上限を18.0mmにし(帯を鼻に沿うアーチに戻してからは、GAが上限へ寄せて
+  弧長が25mmまで縮んだので15.0mmにした。15mmで弧長27mm以上)、鼻栓を下げて(frame_model.DILATOR_PLUG)棒が3mm
   長くなったので下限を10.0mmに下げた。以前の下限13.0mmは、棒を
   平たいブレードにしてアーチの面からリングの面へねじる造形(frame_model.
   _blade_manifold)に必要な長さ(blade_twist_margin、31mm前後で3.0度/mmを
@@ -107,14 +119,14 @@ scripts/dilator/frame_model.pyのモジュールdocstring参照):
   ため、要求する太さ(rod_thickness_margin、直径1.8mm以上)をわずかな余裕を
   持って満たす水準から決めた。つまりこの変数は、レンズの厚みと棒の太さを
   同時に決める一番効くつまみになっている
-- clip_detent: 連結部(エッジクリップ)の位置決め突起の高さ(mm)。連結部を
-  矢じりタブ+スロットから、帯の下縁を挟むクリップに変えた(ユーザーが採用
-  した案1)のに伴い、tab_head_oversize(矢じりの張り出し量)から置き換えた。
-  高いほど帯の丸穴に深くかかって外れにくい(clip_retention_margin、引っかかり
-  0.2mm以上)が、着脱のとき外側の顎が大きく開いて折れやすい
-  (clip_strain_margin、付け根のひずみ3%以下)。後者は帯の幅(=顎の長さ)にも
-  依存するので、bridge_widthとの組み合わせで上限が決まる。範囲0.2〜0.6mmは、
-  下側・上側をそれぞれ2つの制約が実際に弾く幅
+- cuff_detent: 連結部(帯を抱くC)が、帯の端近くの浅い段を越えるときの
+  締めしろ(mm、片側)。連結部をエッジクリップ→帯を抱くCに変えた(ユーザーが
+  3案を見比べて選んだ)のに伴い、clip_detent(クリップの突起の高さ)から
+  置き換えた。大きいほど外すのに力が要る(cuff_retention_margin、1.5〜10N)が、
+  そのぶんCが大きく開いて折れやすい(cuff_strain_margin、ひずみ3%以下)。
+  どちらもCの背の長さ(=帯の幅bridge_width)と、Cの長さ(=棒の幅
+  leg_thickness)に依存するので、それらとの組み合わせで範囲が決まる。
+  範囲0.03〜0.25mmは、下側・上側をそれぞれ2つの制約が実際に弾く幅
 """
 
 import argparse
@@ -147,14 +159,14 @@ from dilator.frame_model import (  # noqa: E402
 # FrameProblem._evaluateがFrameParamsを組み立てる)。根拠はモジュール
 # docstring参照
 _SEARCH_SPACE: list[tuple[str, float, float]] = [
-    ("natural_radius", 6.0, 100.0),
-    ("tab_side_ratio", 1.10, 1.35),
-    ("bridge_y", 10.0, 18.0),
+    ("natural_radius", 14.0, 26.0),
+    ("tab_side_ratio", 1.2, 1.4),
+    ("bridge_y", 10.0, 15.0),
     ("bridge_width", 3.8, 5.0),
     ("bridge_thickness", 0.8, 1.4),
     ("leg_thickness", 2.0, 4.0),
     ("collar_length", 1.9, 2.2),
-    ("clip_detent", 0.2, 0.6),
+    ("cuff_detent", 0.03, 0.25),
 ]
 _VAR_NAMES = [name for name, _, _ in _SEARCH_SPACE]
 _XL = np.array([lo for _, lo, _ in _SEARCH_SPACE])

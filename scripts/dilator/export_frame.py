@@ -16,11 +16,12 @@ FrameParamsの各フィールドに対応するCLI引数で候補フレームを
 レンズ)・右の脚(棒とレンズ)の3つの別々の部品なので、STLも3ファイル
 (<出力名>_frame_bridge.stl・_frame_leg_left.stl・_frame_leg_right.stl)
 になる。脚は装着した形のまま(dilator.frame_model.build_leg_piece)、
-ブリッジは装着した形ではなく、平らに近い自然な形の円弧
-(dilator.frame_model.build_bridge_print_piece)で出力する(鼻の上で曲げて
+ブリッジは装着した形ではなく、同じアーチの曲がりを弱めた(少し開いた)
+自然な形(dilator.frame_model.build_bridge_print_piece)で出力する(鼻の上で曲げて
 貼ったときの曲げ戻りが、ブリーズライトのように小鼻を引き上げる力になる
-ため)。それぞれ別々に3Dプリントし、ブリッジを鼻に貼ってから、脚の先端の
-C字のクリップを帯の下縁に押し込んで組み立てる。STLは色を持たないため
+ため)。それぞれ別々に3Dプリントし、ブリッジを鼻に貼ってから、脚の上端の
+小さなC字を帯の端から滑り込ませ、帯の上下の縁を抱かせて組み立てる
+(dilator.frame_model._leg_connector)。STLは色を持たないため
 寸法だけの出力で、単位はmm(スライサー側でmmとして読み込むこと)。
 """
 

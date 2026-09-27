@@ -25,7 +25,7 @@ scripts/
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
   dilator/     # 拡張ブリッジ型フレーム: 鼻腔拡張テープ(ブリーズライト等)のように鼻を押し開く平らなブリッジ + 鼻栓を受け入れる筒
-    frame_model.py       # 形状(FrameParamsの8変数): 鼻を一定の曲率の円弧で横断する平らな薄いブリッジ(両端は両面テープの貼り代。印刷するときは平らに近い自然な形) + 左右の棒(アーチと同じ板の断面で、アーチの面からリングの面へねじれる平たいブレード。鼻翼の輪郭に沿って鼻孔まで約31mm) + 左右のリング(鼻中隔側を開いたC字の筒)(印刷・装着しやすいよう、帯の下縁をエッジクリップで挟む3部品構成)
+    frame_model.py       # 形状(FrameParamsの8変数): 鼻の前面と側面に沿って横断する平らな薄いブリッジ(両端は巻き込まずまっすぐ伸ばし、両面テープの貼り代にする。印刷するときは同じアーチを少し開いた自然な形) + 左右の棒(アーチと同じ板の断面で、アーチの面からリングの面へねじれる平たいブレード。鼻翼の輪郭に沿って鼻孔まで約31mm) + 左右のリング(鼻中隔側を開いたC字の筒)(印刷・装着しやすいよう3部品に分け、脚の上端の小さなC字が帯の上下の縁を抱いて連結する)
     evaluation.py        # 評価関数(3目的: 拡張力・鼻栓の保持剛性・目立たなさ + 制約16個)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
@@ -119,25 +119,26 @@ $ uv run python scripts/dilator/view_nose.py
 $ uv run python scripts/dilator/optimize.py
 $ uv run python scripts/dilator/optimize.py --sort-by plug_hold
 
-# 上の表から選んだ行の8変数(nat_r tab_pos bridge_y bridge_w bridge_t leg_t collar_l detent)をglTF(.glb)に出力
+# 上の表から選んだ行の8変数(nat_r tab_pos bridge_y bridge_w bridge_t leg_t collar_l detent。detentは--cuff-detent)をglTF(.glb)に出力
 # (base.glbは上書きしない。ファイル名は実行時刻から自動生成、--output-nameで指定も可)
-$ uv run python scripts/dilator/export_frame.py --natural-radius 76.59 --tab-side-ratio 1.27 --bridge-y 13.45 --bridge-width 4.54 --bridge-thickness 1.22 --leg-thickness 3.48 --collar-length 2.16 --clip-detent 0.37 --output-name candidate_balanced.glb
+$ uv run python scripts/dilator/export_frame.py --natural-radius 25.96 --tab-side-ratio 1.20 --bridge-y 14.99 --bridge-width 4.06 --bridge-thickness 1.40 --leg-thickness 3.32 --collar-length 2.08 --cuff-detent 0.12 --output-name candidate_balanced.glb
 
 # --stl を付けると、フレームを3Dプリント用STLとしても書き出す。印刷しやすい
 # ように、ブリッジ(鼻筋のアーチ状の帯)・左の脚(棒とリング)・右の脚(棒と
 # リング)の3つの別々のファイルになる(output/dilator/<出力名>_frame_bridge.stl・
 # _frame_leg_left.stl・_frame_leg_right.stl、単位mm)。ブリッジのSTLは、装着
-# した形ではなく平らに近い自然な形(曲率半径natural_radiusの円弧)で、鼻の上で
-# 曲げて両端を医療用両面テープで貼ると、曲げ戻ろうとする力がブリーズライトの
-# ように小鼻を引き上げる。帯は鼻の上で一定の曲率の円弧になり、鼻の角に沿って
-# 丸まらない(鼻の形が違っても両端さえ肌に届けば貼れる)。両端は鼻の側面の
-# 背面寄りまで届く(長さ約31mm)。脚はそれぞれ別々に
-# プリントし、先端のC字のクリップを帯の下縁に押し込んで組み立てる(差し口は
-# 面取りしてあり、外側の顎の突起が帯の小さな丸穴に落ちて位置が決まる。外す
-# ときは引き抜くだけ)。棒は鼻の側面を小鼻の外側の輪郭(鼻翼)に沿って降り、
-# 鼻中隔側を開いたC字のリングにつながる。この設計では鼻栓は鼻の下端から約6.5mm
+# した形そのものではなく、同じアーチの曲がりを弱めた(少し開いた)自然な形で、
+# 鼻の上で曲げて両端を医療用両面テープで貼ると、曲げ戻ろうとする力がブリーズ
+# ライトのように小鼻を引き上げる。帯は鼻の前面の丸みと側面に沿うアーチで、両端は
+# 鼻の角に沿って巻き込まず、側面の向きのまままっすぐ伸びる(長さ約27mm)。脚は
+# それぞれ別々にプリントし、帯を抱くCで組み立てる: 脚の上端は棒と同じ幅の小さな
+# C字で、帯の上下の縁に掘ったV溝に爪を入れて帯を抱く。帯の端から滑り込ませ、端寄りの
+# 浅い段をカチッと越えると止まる(テープを貼った後でも付け外しできる。爪は帯の厚みの
+# 内側で止まり、肌と帯の間には入らない)。
+# 棒は鼻の側面を小鼻の外側の輪郭(鼻翼)に沿って降り、鼻中隔側を開いたC字のリングに
+# つながる。この設計では鼻栓は鼻の下端から約6.5mm
 # 飛び出している想定で、リングはその露出端を掴む
-$ uv run python scripts/dilator/export_frame.py --natural-radius 76.59 --tab-side-ratio 1.27 --bridge-y 13.45 --bridge-width 4.54 --bridge-thickness 1.22 --leg-thickness 3.48 --collar-length 2.16 --clip-detent 0.37 --output-name candidate_balanced.glb --stl
+$ uv run python scripts/dilator/export_frame.py --natural-radius 25.96 --tab-side-ratio 1.20 --bridge-y 14.99 --bridge-width 4.06 --bridge-thickness 1.40 --leg-thickness 3.32 --collar-length 2.08 --cuff-detent 0.12 --output-name candidate_balanced.glb --stl
 
 # 出力した候補(glb)や、部品単体のSTLをインタラクティブビューアで確認
 $ uv run python scripts/dilator/view_nose.py output/dilator/candidate_balanced.glb

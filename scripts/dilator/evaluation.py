@@ -33,26 +33,26 @@ inconspicuousness +0.07、plug_hold-inconspicuousness −0.64で、3つとも
 **制約(16個。FrameScore参照。すべて0以下であるべき)**
 
 探索範囲(dilator/optimize._SEARCH_SPACE)からランダムに400件を評価した
-ときの違反率(=GAの探索で実際に効いている度合い):
+ときの違反率(=GAの探索で実際に効いている度合い。実行可能は19%):
 
-- 形が成立するかを決める、実際に効く制約: rod_thickness_margin 51.5%・
-  skin_pressure_margin 34.2%・clip_skin_margin 33.8%・clip_strain_margin
-  26.8%・clip_retention_margin 23.5%・joint_access_margin 20.2%・
-  clip_fit_margin 6.2%・rod_kink_margin 1.8%
+- 形が成立するかを決める、実際に効く制約: rod_thickness_margin 49%・
+  cuff_retention_margin 33%・cuff_fit_margin 32%・rod_kink_margin 15%・
+  curvature_margin 6%・cuff_strain_margin 5%・blade_twist_margin 2%
 - 安全網(この探索範囲では違反しないが、幾何の作り方を変えたときに
-  退行を検出する): curvature_margin・bridge_clearance_margin・
-  leg_clearance_margin・collar_clearance_margin・collar_position_margin・
-  lens_protrusion_margin・blade_twist_margin・tape_area_margin。この種の
-  制約は過去の改修で実際に「棒がレンズの穴を塞ぐ」「棒が0.4mmまで潰れる」
-  といった退行を捕まえている。leg_clearance(以前21%)とblade_twist(以前
-  30%)は、棒の経路を平滑化し、板のねじれを回転最小化フレームで均等に
-  配るようにしてから違反しなくなった(鼻から離す補正と平滑化を交互に
-  かけるので食い込まず、ねじれは経路の曲がりの分だけ少なくて済む)
+  退行を検出する): bridge_clearance_margin・leg_clearance_margin・
+  collar_clearance_margin・collar_position_margin・lens_protrusion_margin・
+  cuff_skin_margin・skin_pressure_margin・tape_area_margin・
+  joint_access_margin。この種の制約は過去の改修で実際に「棒がレンズの穴を
+  塞ぐ」「棒が0.4mmまで潰れる」「帯が小鼻の膨らみに食い込む」といった
+  退行を捕まえている
 
-連結部をエッジクリップに変えたのに伴い、矢じりタブ用の3つ(tab_fit・
-tab_thickness・tab_retention)をクリップ用の3つ(clip_fit・clip_strain・
-clip_retention)に置き換え、クリップの内側の縁が肌に食い込む深さを見る
-clip_skin_marginを加えた。
+連結部は、矢じりタブ+スロット → 帯の下縁を挟むエッジクリップ → 帯を
+抱くC(ユーザーが3案の試作を見比べて選んだ。脚の上端が棒と同じ幅の
+小さなC字で、帯の上下の縁のV溝に爪を入れて抱く)と変わってきた。
+制約もそれに合わせて、cuff_fit(溝の両脇の肉・爪が肌側へ出ない・溝が帯の
+まっすぐな区間に収まる)・cuff_strain(帯の端近くの浅い段を越えるときの
+Cのひずみ)・cuff_retention(外すのに要る力が1.5〜10N)・cuff_skin(Cと肌の
+すき間)の4つにしている(frame_model.cuff_*_margin参照)。
 
 閾値はいずれも暫定値で、実際に印刷・装着しながら見直す前提。
 
@@ -94,15 +94,16 @@ clip_skin_marginを加えた。
   =GAから見て定数だったため、拡張力は実質bridge_thicknessだけの関数に
   なっていた。bridge_yを探索変数にしたことで、装着位置そのものも
   最適化の対象になる
-- **印刷する形が自然な形**。この式は、帯を曲率半径natural_radiusの形で
-  印刷し(frame_model.build_bridge_print_piece)、装着時に鼻の上の円弧
-  (actual_radius)まで曲げることが前提。装着した形のまま印刷すると
+- **印刷する形が自然な形**。この式は、帯を装着した形の曲がりを
+  actual_radius/natural_radiusの割合に弱めた形で印刷し(frame_model.
+  build_bridge_print_piece)、装着時に鼻の上のアーチ(actual_radius)まで
+  曲げることが前提。装着した形のまま印刷すると
   たわみが0になり、この拡張力は出ない
 - **skin_pressure(面圧、制約)= 拡張力 / 貼り代の面積**。テープを貼る
   面(frame_model.tape_pad_area、帯の両端のうち肌から_TAPE_MAX_GAP以内の
-  区間)にかかる面圧。帯を一定の曲率の円弧にして(両端を鼻の角に沿って
-  丸めるのをやめて)からは、貼り代が両端の2〜3mmに縮んだため、この制約が
-  最もよく効く(探索範囲の一様サンプルで約8割が違反)。
+  区間)にかかる面圧。帯を一定の曲率の円弧にしていた時期は、貼り代が
+  両端の2〜3mmに縮んで探索範囲の約8割が違反したが、帯を鼻の側面に
+  沿わせ直してからは貼り代が長く、ほとんど効かない。
   上限(_MAX_SKIN_PRESSURE)を超えると、痛みの前にテープが剥がれて力が
   肌へ伝わらない。以前はこれをpainとして目的にしていたが、拡張力・
   接触面積がどちらもbridge_widthに比例して約分され、実質extension_force
@@ -110,7 +111,7 @@ clip_skin_marginを加えた。
 
 ## plug_hold(鼻栓の保持剛性)の構成
 
-plug_hold = 左右の棒を「クリップ側が固定端・リングの中心が荷重点」の
+plug_hold = 左右の棒を「連結部側が固定端・リングの中心が荷重点」の
 3次元の曲がり梁とみなし、リングをいちばんたわみやすい向き(x・y・zの
 うち最悪)に押したときのバネ定数の合計(_plug_hold・_rod_stiffness)。
 カスティリアノの定理で、各点の曲げモーメントを断面の幅の向き・厚みの
@@ -143,9 +144,8 @@ inconspicuousness = -(顔の正面から見たフレームの投影面積mm^2)
 ためGAが常に探索範囲の上限へ張り付いていた(パレートフロントの全個体が
 bridge_width≈上限)。棒は平たいブレードとして、各区間の断面を正面から見た向きへ射影した
 見かけの幅で測り、リングは鼻中隔側を開いたC字の分だけ細く、連結部の
-クリップの影(clip_frontal_area)も加える(以前はブレードを丸棒、リングを
-閉じた輪として数え、クリップは数えていなかった。実測で片側あたり
-クリップ20mm^2・リングの開口-4.7mm^2の差)。
+帯を抱くCの影(cuff_frontal_area)も加える(以前はブレードを丸棒、リングを
+閉じた輪として数え、連結部は数えていなかった)。
 
 投影面積にすることで、bridge_width(実測相関-0.36)・
 leg_thickness(-0.84)・bridge_y(-0.18、高い位置ほど棒が長くなる)が
@@ -168,8 +168,11 @@ from dilator.frame_model import (
     CollarGeometry,
     TabFrame,
     _blade_frames,
-    clip_frontal_area,
-    clip_skin_margin,
+    cuff_fit_margin,
+    cuff_frontal_area,
+    cuff_retention_margin,
+    cuff_skin_margin,
+    cuff_strain_margin,
     FrameParams,
     RodPath,
     bridge_clearance_margin,
@@ -188,9 +191,6 @@ from dilator.frame_model import (
     blade_twist_margin,
     rod_kink_margin,
     rod_thickness_margin,
-    clip_fit_margin,
-    clip_retention_margin,
-    clip_strain_margin,
     validate_collar_no_overlap,
     validate_target_reach,
 )
@@ -219,7 +219,7 @@ def _rod_stiffness(rod: RodPath, tab: TabFrame, collar: CollarGeometry) -> float
     """片側の棒(ブレード)で、リングをいちばんたわみやすい向きに押したときの
     バネ定数(E=1、単位mm)を返す。
 
-    棒を、クリップ側を固定端・リングの中心を荷重点とする3次元の曲がり梁と
+    棒を、連結部側を固定端・リングの中心を荷重点とする3次元の曲がり梁と
     みなし、カスティリアノの定理でたわみを求めてその逆数を取る:
 
         δ/P = ∫ [ M_w²/I_w + M_t²/I_t + M_s²/(G/E·J) ] ds
@@ -339,7 +339,7 @@ def _visible_area(
       長さで、ブレードが正面を向いてねじれている区間ほど太く見える
     - リング: 筒を正面から見た長方形。鼻中隔側を_OPEN_RING_GAP_DEGだけ
       開いたC字なので、横幅は外径×(1+cos(開口/2))
-    - クリップ: 帯の下縁を挟む箱(clip_frontal_area)
+    - 連結部: 帯を抱くC(cuff_frontal_area)
     """
     points = np.array(bridge)
     area = float(np.sum(np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)))
@@ -357,7 +357,7 @@ def _visible_area(
             2 * half_width / _BLADE_ASPECT
         ) * np.abs(np.einsum("ij,ij->i", thick[:-1], across))
         area += float(np.sum(length * apparent))
-        area += clip_frontal_area(tab, frame)
+        area += cuff_frontal_area(tab, frame)
     open_half = np.radians(_OPEN_RING_GAP_DEG) / 2
     for collar in collars:
         area += collar.r_outer * (1 + np.cos(open_half)) * (collar.y_end - collar.y_start)
@@ -366,12 +366,11 @@ def _visible_area(
 
 @dataclass(frozen=True)
 class FrameScore:
-    """フレームの評価値(目的3つ+制約10個。モジュールdocstring参照)。
+    """フレームの評価値(目的3つ+制約16個。モジュールdocstring参照)。
 
-    目的(extension_force/pain/inconspicuousness)はNSGA-IIが探索する
-    トレードオフ。painのみ最小化、他は最大化。制約(curvature_margin
-    以下の10項目)は実行不可能個体を除外するための値で、いずれも0以下で
-    あるべき。
+    目的(extension_force/plug_hold/inconspicuousness)はNSGA-IIが探索する
+    トレードオフで、いずれも最大化。制約(curvature_margin以下の16項目)は
+    実行不可能個体を除外するための値で、いずれも0以下であるべき。
     """
 
     # 目的(3つ)
@@ -388,10 +387,10 @@ class FrameScore:
     rod_thickness_margin: float  # 棒の最も細いところが印刷できる太さか(0以下であるべき)
     rod_kink_margin: float  # 棒の曲がりが急すぎて自己交差していないか(0以下であるべき)
     blade_twist_margin: float  # ブレードのねじれが急すぎないか(0以下であるべき)
-    clip_fit_margin: float  # クリップと帯の穴が帯に収まるか(0以下であるべき)
-    clip_strain_margin: float  # 着脱時にクリップの顎が折れないか(0以下であるべき)
-    clip_retention_margin: float  # クリップの突起が帯の穴に十分かかるか(0以下であるべき)
-    clip_skin_margin: float  # クリップが肌に食い込みすぎないか(0以下であるべき)
+    cuff_fit_margin: float  # 帯を抱くCと縁の溝が帯に収まるか(0以下であるべき)
+    cuff_strain_margin: float  # 着脱時に帯を抱くCが折れないか(0以下であるべき)
+    cuff_retention_margin: float  # 帯を抱くCを外す力がちょうど良い範囲か(0以下であるべき)
+    cuff_skin_margin: float  # 帯を抱くCが肌に当たらないか(0以下であるべき)
     skin_pressure_margin: float  # 貼り代にかかる面圧が上限以内か(0以下であるべき)
     tape_area_margin: float  # 両面テープの貼り代の面積が足りるか(0以下であるべき)
     joint_access_margin: float  # 連結部が鼻の側面に寄っているか(0以下であるべき)
@@ -403,7 +402,7 @@ _MARGIN_EPSILON = 1e-6
 
 
 def constraint_values(score: FrameScore) -> tuple[float, ...]:
-    """FrameScoreの10個の制約値を、NSGA-II(pymoo等)が使う規約(0以下=
+    """FrameScoreの16個の制約値を、NSGA-II(pymoo等)が使う規約(0以下=
     実行可能、正=違反量)に変換したタプルを返す。
     """
     return (
@@ -416,10 +415,10 @@ def constraint_values(score: FrameScore) -> tuple[float, ...]:
         score.rod_thickness_margin - _MARGIN_EPSILON,
         score.rod_kink_margin - _MARGIN_EPSILON,
         score.blade_twist_margin - _MARGIN_EPSILON,
-        score.clip_fit_margin - _MARGIN_EPSILON,
-        score.clip_strain_margin - _MARGIN_EPSILON,
-        score.clip_retention_margin - _MARGIN_EPSILON,
-        score.clip_skin_margin - _MARGIN_EPSILON,
+        score.cuff_fit_margin - _MARGIN_EPSILON,
+        score.cuff_strain_margin - _MARGIN_EPSILON,
+        score.cuff_retention_margin - _MARGIN_EPSILON,
+        score.cuff_skin_margin - _MARGIN_EPSILON,
         score.skin_pressure_margin - _MARGIN_EPSILON,
         score.tape_area_margin - _MARGIN_EPSILON,
         score.joint_access_margin - _MARGIN_EPSILON,
@@ -469,10 +468,10 @@ def evaluate_frame(
         rod_thickness_margin=rod_thickness_margin(rods),
         rod_kink_margin=rod_kink_margin(rods),
         blade_twist_margin=blade_twist_margin(rods, tabs),
-        clip_fit_margin=clip_fit_margin(frame, params),
-        clip_strain_margin=clip_strain_margin(frame),
-        clip_retention_margin=clip_retention_margin(frame),
-        clip_skin_margin=clip_skin_margin(frame, tabs, body),
+        cuff_fit_margin=cuff_fit_margin(frame, params),
+        cuff_strain_margin=cuff_strain_margin(frame),
+        cuff_retention_margin=cuff_retention_margin(frame),
+        cuff_skin_margin=cuff_skin_margin(frame, tabs, body),
         skin_pressure_margin=force / pad_area - _MAX_SKIN_PRESSURE,
         tape_area_margin=tape_area_margin(frame, params),
         joint_access_margin=joint_access_margin(frame, params, body),
