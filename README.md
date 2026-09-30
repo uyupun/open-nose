@@ -29,9 +29,9 @@ scripts/
     evaluation.py        # 評価関数(3目的: 拡張力・鼻栓の保持剛性・目立たなさ + 制約16個)
     scene.py             # 鼻本体・鼻栓・フレームを1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
-  mizuhiki/    # 水引型: 丸めたティッシュ(鼻栓)に着け、3本の紐の帯がティッシュを1周する輪から小鼻の外側へ上がって、あわじ結び(三つ輪)になる器具。横顔で見せ、正面では控えめに
+  mizuhiki/    # 水引型: 丸めたティッシュ(鼻栓)に着け、3本の紐の帯がティッシュを1周する輪から小鼻の外側へ上がって、あわじ結び(三つ輪)になる器具。結びを小鼻の前寄り(鼻の側面)に置き、正面からも横顔からも水引と読める。濃い色で刷ると、結びが鼻の穴の両脇を縁取り、小鼻の輪郭にも見える
     frame_model.py       # 形状(MizuhikiParamsの5変数: 結びの大きさ・高さ・小鼻の上の位置、紐の太さ、端の長さ)。紐の肌の側をつなぐ板と、輪の底を平らに削る補強でFDMで刷れる
-    evaluation.py        # 評価関数(3目的: 横顔での存在感・正面での控えめさ・ティッシュをつかむ面積 + 制約10個)
+    evaluation.py        # 評価関数(3目的: 横顔での存在感・正面での読みやすさ・ティッシュをつかむ面積 + 制約13個)
     scene.py             # 鼻本体・鼻栓・器具を1つのSceneにまとめる
     optimize.py / export_model.py / export_frame.py / view_nose.py
   models/      # 元の設計: 鼻中隔付近のアーム + 鼻栓へ向かうコネクタ(両鼻を同時に挟む)
@@ -161,29 +161,29 @@ $ uv run python scripts/mizuhiki/export_model.py
 $ uv run python scripts/mizuhiki/view_nose.py
 
 # NSGA-IIで結びの大きさ・高さ・小鼻の上の位置・紐の太さを最適化する(40個体×40世代で約7分)。
-# 目的は横顔での存在感・正面での控えめさ・ティッシュをつかむ面積の3つ、制約は11個
+# 目的は横顔での存在感・正面での読みやすさ・ティッシュをつかむ面積の3つ、制約は13個
 # (scripts/mizuhiki/evaluation.py)。output/mizuhiki/ に次を出力する:
 #   evolution.png(世代ごとの分布推移)、pareto.csv(パレートフロントの全個体の変数・目的・制約)、
-#   candidate_presence.glb(横顔での存在感が最大)・candidate_restrained.glb(正面で最も控えめ)・
+#   candidate_presence.glb(横顔での存在感が最大)・candidate_frontal.glb(正面で最も読みやすい)・
 #   candidate_balanced.glb(3つの目的の釣り合いが最も良い)
-# パレートフロントの表は標準出力にも出る。--sort-by {profile_presence,frontal_restraint,tissue_grip} で並び順を変えられる
+# パレートフロントの表は標準出力にも出る。--sort-by {profile_presence,frontal_legibility,tissue_grip} で並び順を変えられる
 $ uv run python scripts/mizuhiki/optimize.py
 
-# 設計変数を指定してglTF(.glb)に出力し、評価関数の結果(目的3つと制約11個の合否)を表示する。
+# 設計変数を指定してglTF(.glb)に出力し、評価関数の結果(目的3つと制約13個の合否)を表示する。
 # 引数を省略した変数は既定値。上の表やpareto.csvから選んだ行の値を渡す(base.glbは上書きしない。
 # ファイル名は実行時刻から自動生成、--output-nameで指定も可)
 $ uv run python scripts/mizuhiki/export_frame.py
-$ uv run python scripts/mizuhiki/export_frame.py --knot-scale 1.5846 --knot-y 2.6460 --knot-f 0.7312 --cord-radius 0.4315 --output-name candidate_balanced
+$ uv run python scripts/mizuhiki/export_frame.py --knot-scale 1.74 --knot-y 2.3006 --knot-f 1.2960 --cord-radius 0.4553 --output-name candidate_frontal
 
 # --print を付けると、器具(左右)をそのまま刷れる向き(輪の底面をベッドに置き、着けたときの上を上にする)の
 # STLとしても書き出す(<出力名>_left_print.stl / _right_print.stl、単位mm)。FDM(0.4mmノズル)向けに、並べた
 # 紐の肌の側を板でつなぎ(つなぎ目の厚み0.6mm以上)、輪の底を0.2mm平らに削ってある。刷るときはツリー
 # サポートとブリムを使う。--stl で鼻に着けた向きのSTLも書き出せる
-$ uv run python scripts/mizuhiki/export_frame.py --knot-scale 1.5846 --knot-y 2.6460 --knot-f 0.7312 --cord-radius 0.4315 --output-name candidate_balanced --print
+$ uv run python scripts/mizuhiki/export_frame.py --knot-scale 1.74 --knot-y 2.3006 --knot-f 1.2960 --cord-radius 0.4553 --output-name candidate_frontal --print
 
 # 出力した候補(glb)や、器具単体のSTLをインタラクティブビューアで確認
-$ uv run python scripts/mizuhiki/view_nose.py output/mizuhiki/candidate_balanced.glb
-$ uv run python scripts/mizuhiki/view_nose.py output/mizuhiki/candidate_balanced_right_print.stl
+$ uv run python scripts/mizuhiki/view_nose.py output/mizuhiki/candidate_frontal.glb
+$ uv run python scripts/mizuhiki/view_nose.py output/mizuhiki/candidate_frontal_right_print.stl
 ```
 
 ### 元の設計(アーム + コネクタ)

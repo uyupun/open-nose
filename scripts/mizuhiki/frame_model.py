@@ -36,9 +36,9 @@
 ## 座標
 
 鼻モデルと同じ(x=左右、y=鼻先(0)→鼻筋、z=前後(前面が+))。小鼻の外側の
-面は、鼻の断面(角丸三角形)の背面側の角の丸みで、_back_arc_pointの比率f
-で位置を指定する(0=顔との境目(z=-2.2付近)、1=側面のまっすぐな辺の
-始まり)。
+面は、鼻の断面(角丸三角形)の背面側の角の丸みと、その前に続く側面の
+まっすぐな辺で、_ala_pointの比率fで位置を指定する(0=顔との境目(z=-2.2
+付近)、1=側面のまっすぐな辺の始まり、1より大きいと側面の辺の上)。
 """
 
 from dataclasses import dataclass
@@ -76,8 +76,14 @@ _TAIL_DIRECTION = (0.5, -1.0)
 # 鼻栓の外側の端の上端と鼻の底面のすき間、鼻の中に入っている長さ(mm)
 _PLUG_TOP_GAP = 0.2
 _PLUG_INSIDE = 8.8
-# 器具の色(黒に近い灰色)
-_COLOR = [52, 52, 60, 255]
+# knot_fの上限。側面のまっすぐな辺の長さは小鼻の角の丸みの約1.1倍なので、2.1で
+# 鼻先の角の丸みの始点に届く(_ala_point)
+_MAX_KNOT_F = 2.1
+# 器具の色(焦げ茶)。結びが鼻の穴の両脇を縁取ると、濃い色では小鼻の輪郭を
+# なぞる影のように見える(ユーザー案「黒で刷ることで、小鼻にも見せる」)。
+# 黒は水引では黒白の弔事の色なので、影に見える濃さのまま、焦げ茶にしている
+# (描画用の色。刷る色はフィラメントで決まる)
+_COLOR = [72, 46, 34, 255]
 
 
 @dataclass(frozen=True)
@@ -89,7 +95,8 @@ class MizuhikiParams:
     - knot_y: 結びの中心の高さ(鼻先の底面の少し上が-3付近、小鼻の上端が
       7.5付近)
     - knot_f: 結びの中心の、小鼻の外側の面の上の位置(0=顔との境目、
-      1=鼻の側面のまっすぐな辺の始まり)
+      1=鼻の側面のまっすぐな辺の始まり。1より大きいと、正面を斜めに向いた
+      鼻の側面の面の上。_ala_point)
     - cord_radius: 紐の半径。帯の幅・輪の高さ・目立ち方が決まる
     - tail_length: 結びの下から垂れる端の長さ
     """
@@ -104,8 +111,8 @@ class MizuhikiParams:
         for name in ("knot_scale", "cord_radius", "tail_length"):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name}は正の値である必要があります: {getattr(self, name)}")
-        if not 0.0 <= self.knot_f <= 1.0:
-            raise ValueError(f"knot_fは0〜1である必要があります: {self.knot_f}")
+        if not 0.0 <= self.knot_f <= _MAX_KNOT_F:
+            raise ValueError(f"knot_fは0〜{_MAX_KNOT_F}である必要があります: {self.knot_f}")
 
 
 @dataclass(frozen=True)
@@ -129,16 +136,23 @@ class MizuhikiPaths:
 # ---- 鼻の形 ----
 
 
-def _back_arc_point(params: NoseParams, y: float, f: float) -> np.ndarray:
-    """高さyの断面の、+x側の背面側の角の丸み(小鼻の外側の面)の上で、
-    比率f(0=顔との境目、1=側面のまっすぐな辺の始まり)の点(x, y, z)。"""
+def _ala_point(params: NoseParams, y: float, f: float) -> np.ndarray:
+    """高さyの断面の、+x側の小鼻の外側の面の上の点(x, y, z)。
+
+    fは、背面側の角の丸み(小鼻の外側の面)の上の比率(0=顔との境目、1=側面の
+    まっすぐな辺の始まり)。1を超えると、角の丸みの長さを単位に、側面の
+    まっすぐな辺(鼻の前寄りの側面。正面を斜めに向いた面)を、鼻先の角の
+    丸みの始点まで前へ進む。
+    """
     half_width, depth_back, depth_front = surface_profile_at(params, y)
     ring = rounded_triangle_ring(half_width, depth_back, depth_front)
     arc = ring[-2 * POINTS_PER_CORNER : -POINTS_PER_CORNER]
-    step = np.linalg.norm(np.diff(arc, axis=0), axis=1)
+    # 背面の角の丸みの終点から、側面のまっすぐな辺を鼻先の角の丸みの始点まで
+    outline = np.vstack([arc, ring[-POINTS_PER_CORNER]])
+    step = np.linalg.norm(np.diff(outline, axis=0), axis=1)
     length = np.concatenate([[0.0], np.cumsum(step)])
-    target = f * length[-1]
-    return np.array([np.interp(target, length, arc[:, 0]), y, np.interp(target, length, arc[:, 1])])
+    target = f * length[len(arc) - 1]
+    return np.array([np.interp(target, length, outline[:, 0]), y, np.interp(target, length, outline[:, 1])])
 
 
 def surface_frame(body: trimesh.Trimesh, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -270,7 +284,7 @@ def build_paths(frame: MizuhikiParams, params: NoseParams, body: trimesh.Trimesh
         axis=1,
     )
     # 結び: 小鼻の外側の面の接平面に描き、平行な光線で肌に沿わせる
-    knot_center = _back_arc_point(params, frame.knot_y, frame.knot_f)
+    knot_center = _ala_point(params, frame.knot_y, frame.knot_f)
     closest, normal = surface_frame(body, knot_center[None, :])
     normal = normal[0]
     up = np.array([0.0, 1.0, 0.0]) - normal[1] * normal
@@ -307,10 +321,15 @@ def build_paths(frame: MizuhikiParams, params: NoseParams, body: trimesh.Trimesh
     tangent = np.gradient(path, axis=0)
     band = np.cross(tangent, reference)
     norms = np.linalg.norm(band, axis=1)
-    if not np.all(norms > 1e-9):
-        bad = np.flatnonzero(~(norms > 1e-9))
-        raise RuntimeError(f"帯の向きが決まらない点: {bad[:10]} / {len(path)}")
-    band /= norms[:, None]
+    # 経路の向きが基準の法線と平行になる点(GAの探索中に、輪から結びへの渡りの
+    # 終わりで実際に出た)では帯の向きが決まらないので、いちばん近い、向きの
+    # 決まる点の向きを使う
+    good = np.flatnonzero(norms > 1e-9)
+    if len(good) == 0:
+        raise RuntimeError(f"帯の向きが1点も決まらない / {len(path)}")
+    band[good] /= norms[good, None]
+    for i in np.flatnonzero(norms <= 1e-9):
+        band[i] = band[good[np.argmin(np.abs(good - i))]]
     # 輪の部分は、上下の向きをそろえる(外積の向きが輪の途中で反転しないように)
     band[:n_ring] *= np.sign(band[:n_ring, 1:2] + 1e-9)
     # 帯を肌に沿わせて並べると、曲がるところで肌の側の紐が肌に近づくので、
